@@ -20,6 +20,7 @@ Editing `/etc/hosts` by hand — or typing your password every time a hosts mana
 **Homebrew**
 
     brew tap heronapp/tap
+    brew trust heronapp/tap   # newer Homebrew requires trusting third-party taps once
     brew install --cask hostflip
 
 **Direct download**
