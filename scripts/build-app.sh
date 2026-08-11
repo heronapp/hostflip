@@ -4,7 +4,9 @@
 # Usage: CODESIGN_IDENTITY="Developer ID Application: … (TEAMID)" scripts/build-app.sh
 # Without CODESIGN_IDENTITY the bundle is ad-hoc signed: that verifies the
 # packaging structure, but carries no Team ID, so the XPC mutual verification
-# fails closed (see docs/signed-build-verification.md).
+# fails closed (see docs/signed-build-verification.md) and the app does not
+# launch at all — hardened-runtime library validation rejects the embedded
+# Sparkle.framework without a matching Team ID.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
