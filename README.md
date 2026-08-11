@@ -54,7 +54,7 @@ An ad-hoc build verifies the packaging structure, but the XPC channel intentiona
 
 Use “Deactivate and Remove Helper…” in the app first (unregisters the daemon), then delete `Hostflip.app`. `brew uninstall --zap --cask hostflip` also clears application data.
 
-Note that `/etc/hosts` keeps whatever hostflip last wrote — uninstalling does not rewrite it, and entries from profiles that were active stay in effect. If you want only your baseline hosts applied, turn off the master switch (which restores Base Hosts) **before** removing the helper; once the helper is gone, hostflip can no longer write the file. Your pre-hostflip hosts file is preserved as `hosts.orig` in `~/Library/Application Support/hostflip` until that folder is zapped.
+Note that `/etc/hosts` keeps whatever hostflip last wrote — uninstalling does not rewrite it. Everything hostflip added sits in a clearly fenced block at the bottom of the file (`# ══ hostflip:begin … ══` through `# ══ hostflip:end ══`), so leftover entries are easy to spot and delete by hand. Better still, turn off the master switch **before** removing the helper: that restores the file to exactly your baseline hosts, with no hostflip traces at all — once the helper is gone, hostflip can no longer write the file. Your pre-hostflip hosts file is also preserved as `hosts.orig` in `~/Library/Application Support/hostflip` until that folder is zapped.
 
 ## License
 

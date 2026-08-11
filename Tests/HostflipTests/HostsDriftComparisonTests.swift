@@ -1,4 +1,5 @@
 import Foundation
+import HostflipCore
 import XCTest
 @testable import Hostflip
 
@@ -16,17 +17,16 @@ final class HostsDriftComparisonTests: XCTestCase {
         XCTAssertEqual(comparison.diffSummary, HostsDriftDiffSummary(additions: 1, removals: 1))
     }
 
-    func testGeneratedHostflipBannerIsDetectedAnywhereInSystemHosts() {
-        let comparison = HostsDriftComparison(
-            expectedContent: "",
-            actualData: Data((
-                "# external prefix\n"
-                    + HostsDriftComparison.generatedBanner
-                    + "\n"
-            ).utf8)
-        )
-
-        XCTAssertTrue(comparison.containsGeneratedHostflipOutput)
+    func testGeneratedHostflipMarkersAreDetectedAnywhereInSystemHosts() {
+        // Both the current fence and the pre-0.1.2 top banner count as
+        // generated output, wherever they appear in the file.
+        for marker in [MergedHosts.appendedBlockBegin, MergedHosts.legacyGeneratedBanner] {
+            let comparison = HostsDriftComparison(
+                expectedContent: "",
+                actualData: Data(("# external prefix\n" + marker + "\n").utf8)
+            )
+            XCTAssertTrue(comparison.containsGeneratedHostflipOutput, marker)
+        }
     }
 
     func testInvalidUTF8HasNoAdoptableActualContent() {
