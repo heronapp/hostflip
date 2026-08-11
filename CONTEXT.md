@@ -44,6 +44,10 @@ _Avoid_: disabled, deactivated
 Controls how the app's Dock icon is shown — "When Main Window Is Open", "Always", or "Never"; does not affect the always-visible menu bar entry.
 _Avoid_: menu-bar-only mode, menu bar switch
 
+**Launch at Login**:
+Whether hostflip registers itself as a login item to start automatically at login; login launches stay silent in the menu bar without opening the main window.
+_Avoid_: auto-start, boot launch
+
 **Workspace**:
 hostflip's persistence directory; holds Base Hosts, the profile files, the manifest, and the original backup from first import (hosts.orig).
 _Avoid_: data directory, config directory
