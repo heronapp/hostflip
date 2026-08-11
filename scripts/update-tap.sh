@@ -21,6 +21,11 @@ sed -i '' \
     -e "s|^  sha256 \".*\"$|  sha256 \"$SHA256\"|" "$CASK"
 grep -q "version \"$VER\"" "$CASK" || { echo "error: cask version rewrite failed" >&2; exit 1; }
 grep -q "sha256 \"$SHA256\"" "$CASK" || { echo "error: cask sha256 rewrite failed" >&2; exit 1; }
+# The app self-updates via Sparkle; tell brew so `brew upgrade --greedy` semantics apply.
+if ! grep -q "^  auto_updates true$" "$CASK"; then
+    sed -i '' "s|^  sha256 \"$SHA256\"$|  sha256 \"$SHA256\"\n\n  auto_updates true|" "$CASK"
+    grep -q "^  auto_updates true$" "$CASK" || { echo "error: cask auto_updates insert failed" >&2; exit 1; }
+fi
 
 # Commit as the GitHub noreply identity, so the machine's global git config
 # email never leaks into the public tap.

@@ -76,82 +76,11 @@ final class MaintenanceStoreTests: XCTestCase {
     }
 
     @MainActor
-    func testCheckForUpdatesOpensNewerSemanticVersionRelease() async throws {
-        let helper = HelperMaintenanceStub(status: .enabled)
-        let releaseURL = try XCTUnwrap(URL(string: "https://github.com/heronapp/hostflip/releases/tag/v0.10.0"))
-        let opener = ReleaseOpenerStub()
-        let store = makeStore(
-            helper: helper,
-            currentVersion: "0.9.0",
-            latestRelease: {
-                GitHubRelease(version: "v0.10.0", pageURL: releaseURL)
-            },
-            openRelease: { opener.open($0) }
-        )
-
-        await store.checkForUpdates()
-
-        XCTAssertEqual(opener.openedURLs, [releaseURL])
-        XCTAssertEqual(store.feedback, .updateOpened(version: "0.10.0"))
-    }
-
-    @MainActor
-    func testCheckForUpdatesReportsWhenCurrentVersionIsLatest() async throws {
-        let helper = HelperMaintenanceStub(status: .enabled)
-        let releaseURL = try XCTUnwrap(URL(string: "https://github.com/heronapp/hostflip/releases/tag/v0.9.0"))
-        let opener = ReleaseOpenerStub()
-        let store = makeStore(
-            helper: helper,
-            currentVersion: "0.9.0",
-            latestRelease: {
-                GitHubRelease(version: "v0.9.0", pageURL: releaseURL)
-            },
-            openRelease: { opener.open($0) }
-        )
-
-        await store.checkForUpdates()
-
-        XCTAssertTrue(opener.openedURLs.isEmpty)
-        XCTAssertEqual(store.feedback, .upToDate(version: "0.9.0"))
-    }
-
-    @MainActor
-    func testCheckForUpdatesReportsNetworkFailure() async {
-        let helper = HelperMaintenanceStub(status: .enabled)
-        let store = makeStore(helper: helper)
-
-        await store.checkForUpdates()
-
-        guard case .updateCheckFailed(let message) = store.feedback else {
-            return XCTFail("应显示更新检查失败反馈")
-        }
-        XCTAssertTrue(message.contains("Try again"))
-    }
-
-    @MainActor
-    private func makeStore(
-        helper: HelperMaintenanceStub,
-        currentVersion: String = "0.9.0",
-        latestRelease: @escaping @Sendable () async throws -> GitHubRelease = { throw StubError() },
-        openRelease: @escaping (URL) -> Bool = { _ in true }
-    ) -> MaintenanceStore {
+    private func makeStore(helper: HelperMaintenanceStub) -> MaintenanceStore {
         MaintenanceStore(
-            currentVersion: currentVersion,
             helperStatus: { await helper.currentStatus() },
-            unregisterHelper: { try await helper.unregister() },
-            latestRelease: latestRelease,
-            openRelease: openRelease
+            unregisterHelper: { try await helper.unregister() }
         )
-    }
-}
-
-@MainActor
-private final class ReleaseOpenerStub {
-    private(set) var openedURLs: [URL] = []
-
-    func open(_ url: URL) -> Bool {
-        openedURLs.append(url)
-        return true
     }
 }
 

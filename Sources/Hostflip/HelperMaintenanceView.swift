@@ -60,7 +60,8 @@ struct HelperStatusLabel: View {
     }
 }
 
-/// User-facing maintenance panel: the entry point for both helper management and update checks.
+/// User-facing maintenance panel: the entry point for helper management.
+/// Update checks moved to Settings > Updates (#34).
 struct HelperMaintenanceView: View {
     let store: WorkspaceStore
     let maintenanceStore: MaintenanceStore
@@ -115,26 +116,6 @@ struct HelperMaintenanceView: View {
                     }
                     .controlSize(.small)
                 }
-            }
-
-            Divider()
-
-            HStack(spacing: 10) {
-                Label("Updates", systemImage: "arrow.triangle.2.circlepath")
-                    .font(.subheadline.weight(.semibold))
-                Text("v\(maintenanceStore.currentVersion)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if maintenanceStore.isCheckingForUpdates {
-                    ProgressView()
-                        .controlSize(.small)
-                }
-                Button("Check for Updates") {
-                    Task { await maintenanceStore.checkForUpdates() }
-                }
-                .controlSize(.small)
-                .disabled(maintenanceStore.isCheckingForUpdates)
             }
 
             if let feedback = maintenanceStore.feedback {
