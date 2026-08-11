@@ -514,7 +514,6 @@ struct MainWindowView: View {
                         .fill(Color.primary.opacity(0.06))
                 }
             }
-            .padding(.leading, groupID == nil ? 0 : 14)
             .tag(SidebarItem.profile(profile.id))
             .modifier(sidebarDropTarget(.profileRow(profile.id, groupID: groupID, index: index)))
             .overlay(alignment: .top) {
@@ -537,6 +536,13 @@ struct MainWindowView: View {
         selection = .profile(profileID)
         profilePendingNameFocus = profileID
     }
+
+    private func createProfile(in groupID: HostflipCore.Group.ID) {
+        guard let profileID = store.createProfile(in: groupID) else { return }
+        selection = .profile(profileID)
+        profilePendingNameFocus = profileID
+    }
+
 
     private func createGroup() {
         guard let groupID = store.createGroup(),
@@ -614,7 +620,10 @@ struct MainWindowView: View {
                     .fill(Color.primary.opacity(0.06))
             }
         }
-        .padding(.horizontal, 6)
+        // Counter the inner breathing-room padding so the title text left-aligns
+        // with the plain "Standalone Profiles" header; the hover box extends left.
+        .padding(.leading, -6)
+        .padding(.trailing, 6)
         .modifier(sidebarDropTarget(
             .groupHeader(group.id, index: index, memberCount: group.profiles.count)
         ))
@@ -635,6 +644,10 @@ struct MainWindowView: View {
 
     @ViewBuilder
     private func groupActionButtons(_ group: HostflipCore.Group, index: Int) -> some View {
+        Button("New Profile") {
+            createProfile(in: group.id)
+        }
+        Divider()
         Button("Rename Group…") {
             beginRenaming(group)
         }

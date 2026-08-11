@@ -223,6 +223,20 @@ final class WorkspaceStore {
         return profileID
     }
 
+    /// Same as createStandaloneProfile, but the new profile lands directly in the
+    /// group — a single edit, so one manifest write covers the add and the move.
+    @discardableResult
+    func createProfile(in groupID: Group.ID) -> Profile.ID? {
+        guard model != nil else { return nil }
+        let profileID = Profile.ID(UUID().uuidString)
+        let name = defaultProfileName()
+        applyEdit {
+            try $0.addProfile(id: profileID, name: name, content: "# Add hosts entries here\n")
+            try $0.moveProfile(profileID, toGroup: groupID)
+        }
+        return profileID
+    }
+
     func renameProfile(_ profileID: Profile.ID, to name: String) {
         guard let profile = profile(profileID),
               let normalized = normalizedRenameName(name, currentName: profile.name) else { return }
