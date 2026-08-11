@@ -1,0 +1,341 @@
+import Foundation
+
+/// hostflip's persistent workspace (defaults to `~/Library/Application Support/hostflip/`).
+///
+/// Directory layout (see the ticket #4 resolution):
+/// - `hosts.orig`: pristine backup of the system hosts taken at first import; kept forever, never rewritten
+/// - `base.hosts`: Base Hosts content, updatable in a controlled way by the drift reconciliation flow
+/// - `profiles/*.hosts`: each profile's content; file name = profile name (sanitized + conflict suffix)
+/// - `manifest.json`: group structure, active state, ordering
+public enum WorkspaceError: Error, Equatable, Sendable {
+    /// The workspace has residual content (base.hosts or profile files) but no manifest;
+    /// it must not be overwritten as a first-run import and needs manual intervention.
+    case residualContentWithoutManifest
+    /// The workspace has not completed first import; domain state cannot be saved and the last-written hash cannot be read or written.
+    case notInitialized
+}
+
+public struct Workspace: Sendable {
+    public let rootDirectory: URL
+
+    /// Default workspace location (`~/Library/Application Support/hostflip/`).
+    public static var defaultRootDirectory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("hostflip", isDirectory: true)
+    }
+
+    public init(rootDirectory: URL) {
+        self.rootDirectory = rootDirectory
+    }
+
+    /// Opens the workspace: an empty workspace imports the system hosts as Base Hosts; an initialized
+    /// workspace restores from existing data and no longer reads the system hosts.
+    public func open(systemHosts: () throws -> String) throws -> ActivationModel {
+        if FileManager.default.fileExists(atPath: manifestURL.path) {
+            return try load()
+        }
+        guard !hasResidualContent else {
+            throw WorkspaceError.residualContentWithoutManifest
+        }
+        return try importSystemHosts(systemHosts)
+    }
+
+    /// hosts.orig alone is treated as an interrupted first import and safe to re-import;
+    /// base.hosts or profile files, however, are unreproducible user content.
+    private var hasResidualContent: Bool {
+        if FileManager.default.fileExists(atPath: baseHostsURL.path) {
+            return true
+        }
+        let profileFiles = (try? FileManager.default.contentsOfDirectory(
+            at: profilesDirectory,
+            includingPropertiesForKeys: nil
+        )) ?? []
+        return profileFiles.contains { $0.pathExtension == "hosts" }
+    }
+
+    // MARK: - First import
+
+    private func importSystemHosts(_ systemHosts: () throws -> String) throws -> ActivationModel {
+        let content = try systemHosts()
+
+        try FileManager.default.createDirectory(at: profilesDirectory, withIntermediateDirectories: true)
+        try writeOriginalBackupIfAbsent(content)
+
+        let model = try ActivationModel(
+            baseHosts: BaseHosts(content: content),
+            standaloneProfiles: [],
+            groups: []
+        )
+        try save(model)
+        return model
+    }
+
+    /// Exclusive creation avoids the check-then-write race of concurrent initialization; an existing backup is never rewritten.
+    private func writeOriginalBackupIfAbsent(_ content: String) throws {
+        do {
+            try Data(content.utf8).write(to: originalBackupURL, options: .withoutOverwriting)
+        } catch let error as CocoaError where error.code == .fileWriteFileExists {
+            // Backup already exists (an interrupted first import or concurrent initialization)
+        }
+    }
+
+    // MARK: - Saving
+
+    public func save(_ model: ActivationModel) throws {
+        try save(model, acceptingSystemHostsHash: nil)
+    }
+
+    /// Accepts the system hosts the user just reviewed as the new Base Hosts; domain content and the observed
+    /// hash are persisted under the same manifest lock, but the system file is not rewritten and hosts.orig stays untouched.
+    public func save(
+        _ model: ActivationModel,
+        acceptingSystemHostsHash acceptedHash: String
+    ) throws {
+        try save(model, acceptingSystemHostsHash: Optional(acceptedHash))
+    }
+
+    private func save(
+        _ model: ActivationModel,
+        acceptingSystemHostsHash acceptedHash: String?
+    ) throws {
+        guard FileManager.default.fileExists(atPath: originalBackupURL.path) else {
+            throw WorkspaceError.notInitialized
+        }
+        try withManifestLock {
+            // Read the old manifest before writing any content files: we must neither discover a corrupt manifest
+            // after leaving half a set of new content behind, nor silently reset the stored hash (#24's comparison primitive) to nil.
+            let priorLastWrittenHash = FileManager.default.fileExists(atPath: manifestURL.path)
+                ? try loadManifest().lastWrittenHash
+                : nil
+            try FileManager.default.createDirectory(at: profilesDirectory, withIntermediateDirectories: true)
+            try write(model.baseHosts.content, to: baseHostsURL)
+
+            let fileNames = assignFileNames(for: model.standaloneProfiles + model.groups.flatMap(\.profiles))
+            func writeProfileFile(for profile: Profile) throws -> ManifestProfile {
+                let fileName = fileNames[profile.id]!
+                try write(profile.content, to: profilesDirectory.appendingPathComponent(fileName))
+                return ManifestProfile(id: profile.id.rawValue, name: profile.name, file: fileName)
+            }
+
+            let manifest = try Manifest(
+                standaloneProfiles: model.standaloneProfiles.map(writeProfileFile),
+                groups: model.groups.map { group in
+                    try ManifestGroup(
+                        id: group.id.rawValue,
+                        name: group.name,
+                        profiles: group.profiles.map(writeProfileFile)
+                    )
+                },
+                activeProfileIDs: model.activeProfileIDs.map(\.rawValue).sorted(),
+                isPaused: model.isPaused,
+                lastWrittenHash: acceptedHash ?? priorLastWrittenHash
+            )
+            try writeManifest(manifest)
+
+            // Stale profile files are cleaned up only after the manifest is persisted: if any step fails midway,
+            // every file the on-disk manifest references still exists, keeping the workspace loadable.
+            let expectedFileNames = Set(fileNames.values.map { $0.lowercased() })
+            for url in try FileManager.default.contentsOfDirectory(
+                at: profilesDirectory,
+                includingPropertiesForKeys: nil
+            ) where url.pathExtension == "hosts" && !expectedFileNames.contains(url.lastPathComponent.lowercased()) {
+                try FileManager.default.removeItem(at: url)
+            }
+        }
+    }
+
+    private func writeManifest(_ manifest: Manifest) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(manifest).write(to: manifestURL, options: .atomic)
+    }
+
+    // MARK: - Last-written hash
+
+    /// The output hash (`MergedHosts.hash`) of the last successful merge write to the system hosts;
+    /// nil if nothing has been written yet. External-modification detection (#24) compares against this baseline.
+    public func lastWrittenHash() throws -> String? {
+        try requireManifest().lastWrittenHash
+    }
+
+    /// The hash the system hosts should currently have. After a successful merge write, the daemon-confirmed value wins;
+    /// before any write it falls back to the read-only pristine snapshot from first import, so even the first write has a verifiable baseline.
+    public func expectedSystemHostsHash() throws -> String {
+        if let lastWrittenHash = try requireManifest().lastWrittenHash {
+            return lastWrittenHash
+        }
+        return MergedHosts.hash(of: try Data(contentsOf: originalBackupURL))
+    }
+
+    /// Records the hash after a successful merge write; only this field is updated, domain state is left untouched.
+    public func recordLastWrittenHash(_ hash: String) throws {
+        try withManifestLock {
+            var manifest = try requireManifest()
+            manifest.lastWrittenHash = hash
+            try writeManifest(manifest)
+        }
+    }
+
+    /// Reading or writing the last-written hash requires the manifest to exist (guaranteed once open has completed first import).
+    private func requireManifest() throws -> Manifest {
+        guard FileManager.default.fileExists(atPath: manifestURL.path) else {
+            throw WorkspaceError.notInitialized
+        }
+        return try loadManifest()
+    }
+
+    // MARK: - Loading
+
+    private func loadManifest() throws -> Manifest {
+        try JSONDecoder().decode(Manifest.self, from: Data(contentsOf: manifestURL))
+    }
+
+    private func load() throws -> ActivationModel {
+        let manifest = try loadManifest()
+        let baseContent = try String(contentsOf: baseHostsURL, encoding: .utf8)
+
+        func profile(from entry: ManifestProfile) throws -> Profile {
+            try Profile(
+                id: .init(entry.id),
+                name: entry.name,
+                content: String(
+                    contentsOf: profilesDirectory.appendingPathComponent(entry.file),
+                    encoding: .utf8
+                )
+            )
+        }
+
+        return try ActivationModel(
+            baseHosts: BaseHosts(content: baseContent),
+            standaloneProfiles: manifest.standaloneProfiles.map(profile),
+            groups: manifest.groups.map { group in
+                try Group(
+                    id: .init(group.id),
+                    name: group.name,
+                    profiles: group.profiles.map(profile)
+                )
+            },
+            activeProfileIDs: Set(manifest.activeProfileIDs.map(Profile.ID.init)),
+            isPaused: manifest.isPaused
+        )
+    }
+
+    // MARK: - Profile file names
+
+    /// File name = profile name; characters illegal in macOS file names are replaced, and name collisions
+    /// (including collisions on case-insensitive file systems) get a ` 2`, ` 3`… suffix. Suffixes are stable: a file
+    /// name from the previous manifest that still matches the current profile name is reused as is, so reordering
+    /// never makes same-named profiles swap files.
+    private func assignFileNames(for profiles: [Profile]) -> [Profile.ID: String] {
+        let priorFileNames: [Profile.ID: String] = (try? loadManifest()).map { manifest in
+            let entries = manifest.standaloneProfiles + manifest.groups.flatMap(\.profiles)
+            return Dictionary(entries.map { (Profile.ID($0.id), $0.file) }) { first, _ in first }
+        } ?? [:]
+
+        var assigned: [Profile.ID: String] = [:]
+        // Every file name referenced by the previous manifest stays reserved for its original owner and is
+        // off-limits to other profiles: no file write before the manifest lands can overwrite content the old
+        // manifest references (swap-renames are safe too), so the old state is fully recoverable if a save fails midway.
+        var taken = Set(priorFileNames.values.map { $0.lowercased() })
+
+        for profile in profiles {
+            guard let prior = priorFileNames[profile.id],
+                  fileName(prior, matchesBase: sanitizedBase(for: profile.name))
+            else { continue }
+            assigned[profile.id] = prior
+        }
+
+        for profile in profiles where assigned[profile.id] == nil {
+            let base = sanitizedBase(for: profile.name)
+            var candidate = base
+            var counter = 2
+            while !taken.insert("\(candidate).hosts".lowercased()).inserted {
+                candidate = "\(base) \(counter)"
+                counter += 1
+            }
+            assigned[profile.id] = "\(candidate).hosts"
+        }
+        return assigned
+    }
+
+    private func sanitizedBase(for name: String) -> String {
+        let illegalCharacters = CharacterSet(charactersIn: "/:\0")
+        let base = name.components(separatedBy: illegalCharacters).joined(separator: "-")
+        return base.isEmpty ? "Untitled" : base
+    }
+
+    /// Whether this file name belongs to the given sanitized profile name (`base.hosts` or `base N.hosts`).
+    private func fileName(_ fileName: String, matchesBase base: String) -> Bool {
+        let fileName = fileName.lowercased()
+        let base = base.lowercased()
+        guard fileName.hasSuffix(".hosts") else { return false }
+        let stem = String(fileName.dropLast(".hosts".count))
+        if stem == base { return true }
+        guard stem.hasPrefix(base + " ") else { return false }
+        return Int(stem.dropFirst(base.count + 1)) != nil
+    }
+
+    // MARK: - Manifest mutual exclusion
+
+    /// Read-modify-write mutual exclusion for the manifest (one lock per workspace directory): main-window
+    /// edits persist synchronously on the MainActor (save), while merge confirmation writes the hash back on a
+    /// background task chain (recordLastWrittenHash); without mutual exclusion, running concurrently would
+    /// overwrite the other side's freshly written manifest with stale values (#20 re-review).
+    private static let manifestLocks = ManifestLockRegistry()
+
+    private func withManifestLock<T>(_ body: () throws -> T) rethrows -> T {
+        let lock = Self.manifestLocks.lock(forPath: rootDirectory.standardizedFileURL.path)
+        lock.lock()
+        defer { lock.unlock() }
+        return try body()
+    }
+
+    // MARK: - File layout
+
+    private var originalBackupURL: URL { rootDirectory.appendingPathComponent("hosts.orig") }
+    private var baseHostsURL: URL { rootDirectory.appendingPathComponent("base.hosts") }
+    private var manifestURL: URL { rootDirectory.appendingPathComponent("manifest.json") }
+    private var profilesDirectory: URL { rootDirectory.appendingPathComponent("profiles", isDirectory: true) }
+
+    private func write(_ content: String, to url: URL) throws {
+        try Data(content.utf8).write(to: url, options: .atomic)
+    }
+}
+
+/// Hands out mutual-exclusion locks keyed by workspace path; Workspace is a value type, so locks must live in
+/// a path-keyed shared registry for all instances over the same directory to actually exclude each other.
+private final class ManifestLockRegistry: @unchecked Sendable {
+    private let registryLock = NSLock()
+    private var locks: [String: NSLock] = [:]
+
+    func lock(forPath path: String) -> NSLock {
+        registryLock.withLock {
+            if let existing = locks[path] { return existing }
+            let created = NSLock()
+            locks[path] = created
+            return created
+        }
+    }
+}
+
+private struct Manifest: Codable {
+    var version = 1
+    var standaloneProfiles: [ManifestProfile]
+    var groups: [ManifestGroup]
+    var activeProfileIDs: [String]
+    var isPaused: Bool
+    /// The output hash of the last merge write to the system hosts; old manifests that never wrote lack this key.
+    var lastWrittenHash: String?
+}
+
+private struct ManifestProfile: Codable {
+    var id: String
+    var name: String
+    var file: String
+}
+
+private struct ManifestGroup: Codable {
+    var id: String
+    var name: String
+    var profiles: [ManifestProfile]
+}

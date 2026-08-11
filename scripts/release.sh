@@ -1,0 +1,171 @@
+#!/bin/bash
+# Repeatable local release pipeline (verification log: docs/release-verification.md):
+#   guards (version, clean tree, certificate) → clean build + signing (scripts/build-app.sh)
+#   → signature acceptance gate → notarization #1 + staple (app) → DMG signing
+#   + notarization #2 + staple → Gatekeeper acceptance → GitHub Release
+#   (uploaded as a draft, published only once everything is ready).
+#
+# Usage:
+#   scripts/release.sh               full release (creates the GitHub Release at the end)
+#   scripts/release.sh --no-publish  rehearsal: produce the fully verified DMG, never touch GitHub
+#
+# One-time setup (credentials go only into the local keychain; the pipeline then
+# refers to them by profile name and never prints secrets):
+#   xcrun notarytool store-credentials hostflip-notary \
+#       --apple-id <AppleID> --team-id EA9SPTEHTA
+# An existing profile for the same Team can be used via NOTARY_PROFILE=<name>.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+PUBLISH=1
+if [ "${1:-}" = "--no-publish" ]; then
+    PUBLISH=0
+elif [ -n "${1:-}" ]; then
+    echo "error: unknown argument: $1 (only --no-publish is supported)" >&2; exit 1
+fi
+
+TEAM_ID=EA9SPTEHTA
+NOTARY_PROFILE="${NOTARY_PROFILE:-hostflip-notary}"
+PLIST=Packaging/HostflipApp-Info.plist
+DIST=build/dist
+
+echo "==> Pre-release guards"
+# Full dirty check including untracked files: they never enter the artifact, but
+# they blur which commit the artifact corresponds to.
+[ -z "$(git status --porcelain)" ] || \
+    { echo "error: git tree is not clean (a release requires a fully clean tree, untracked included)" >&2; exit 1; }
+
+IDENTITY="$(security find-identity -v -p codesigning | \
+    grep -o "\"Developer ID Application: .*($TEAM_ID)\"" | tr -d '"' | head -1 || true)"
+[ -n "$IDENTITY" ] || \
+    { echo "error: no \"Developer ID Application\" certificate for Team $TEAM_ID in the Keychain" >&2; exit 1; }
+
+VER="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$PLIST")"
+BUILD="$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$PLIST")"
+echo "$VER" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || \
+    { echo "error: version \"${VER}\" is not an X.Y.Z semantic version" >&2; exit 1; }
+echo "$BUILD" | grep -Eq '^[1-9][0-9]*$' || \
+    { echo "error: build version \"${BUILD}\" is not a positive integer" >&2; exit 1; }
+# Dual version source (see ADR 0003): the plist and HostflipBuild.version must agree.
+grep -qF "public static let version = \"$VER\"" Sources/HostflipXPC/ChannelIdentity.swift || \
+    { echo "error: HostflipBuild.version disagrees with $VER in $PLIST (the two locations must be updated together)" >&2; exit 1; }
+
+# Compare against the highest released tag on the remote: both the semantic
+# version and the build version must strictly increase.
+REMOTE_TAGS="$(git ls-remote --tags origin 'refs/tags/v*' | \
+    awk -F/ '{print $NF}' | grep -v '\^{}$' || true)"
+if echo "$REMOTE_TAGS" | grep -qx "v$VER"; then
+    echo "error: tag v$VER already exists on origin" >&2; exit 1
+fi
+PREV_TAG="$(echo "$REMOTE_TAGS" | sort -V | tail -1)"
+if [ -n "$PREV_TAG" ]; then
+    PREV_VER="${PREV_TAG#v}"
+    [ "$(printf '%s\n%s\n' "$PREV_VER" "$VER" | sort -V | tail -1)" = "$VER" ] || \
+        { echo "error: version $VER is not higher than the released $PREV_VER" >&2; exit 1; }
+    git fetch --quiet origin "refs/tags/$PREV_TAG:refs/tags/$PREV_TAG"
+    PREV_PLIST="$(mktemp)"
+    git show "$PREV_TAG:$PLIST" > "$PREV_PLIST"
+    PREV_BUILD="$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$PREV_PLIST")"
+    rm -f "$PREV_PLIST"
+    [ "$BUILD" -gt "$PREV_BUILD" ] || \
+        { echo "error: build version $BUILD is not higher than $PREV_BUILD of $PREV_TAG" >&2; exit 1; }
+fi
+
+if [ "$PUBLISH" -eq 1 ]; then
+    # Publishing must run in a clone of the public repository: releases and tags
+    # belong to the public repo.
+    git remote get-url origin | grep -Eq "heronapp/hostflip(\.git)?$" || \
+        { echo "error: publishing must run in a public-repo clone (origin = heronapp/hostflip)" >&2; exit 1; }
+    # The release tag points at the local HEAD: it must already be pushed to
+    # origin/main, or the tag and the artifact would disagree.
+    [ "$(git rev-parse HEAD)" = "$(git ls-remote origin refs/heads/main | cut -f1)" ] || \
+        { echo "error: local HEAD does not match origin/main (push first, then release)" >&2; exit 1; }
+fi
+
+echo "==> Clean build + signing (${IDENTITY})"
+swift package clean
+CODESIGN_IDENTITY="$IDENTITY" scripts/build-app.sh
+APP=build/Hostflip.app
+
+echo "==> Signature acceptance gate (per object, every check is a hard failure)"
+codesign --verify --deep --strict "$APP"
+for T in "$APP/Contents/MacOS/Hostflip" "$APP/Contents/MacOS/hostflipd" "$APP"; do
+    INFO="$(codesign -dvv "$T" 2>&1)" || \
+        { printf '%s\n' "$INFO" >&2; echo "error: codesign -dvv failed: $T" >&2; exit 1; }
+    echo "$INFO" | grep -q "TeamIdentifier=$TEAM_ID" || \
+        { echo "error: TeamIdentifier mismatch: $T" >&2; exit 1; }
+    echo "$INFO" | grep -q "Timestamp=" || \
+        { echo "error: missing secure timestamp: $T" >&2; exit 1; }
+    echo "$INFO" | grep -Eq "flags=.*runtime" || \
+        { echo "error: missing hardened runtime flag: $T" >&2; exit 1; }
+done
+# Capture into a variable before grep: piping codesign straight into grep -q can
+# make codesign take a SIGPIPE when grep exits early — a false failure under pipefail.
+DAEMON_INFO="$(codesign -dvv "$APP/Contents/MacOS/hostflipd" 2>&1)"
+echo "$DAEMON_INFO" | grep -q "Identifier=com.heronapp.hostflip.daemon" || \
+    { echo "error: daemon signing identifier is not com.heronapp.hostflip.daemon" >&2; exit 1; }
+
+# notarytool --wait's exit code is not fully trustworthy; trust "status: Accepted"
+# in its output instead (observed in practice).
+notarize() { # $1=file to submit  $2=label
+    local OUT
+    OUT="$(xcrun notarytool submit "$1" --keychain-profile "$NOTARY_PROFILE" --wait 2>&1)" || true
+    printf '%s\n' "$OUT"
+    printf '%s\n' "$OUT" | grep -q "status: Accepted" || {
+        echo "error: notarization was not accepted ($2). To investigate:" >&2
+        echo "  xcrun notarytool log <id from the output above> --keychain-profile $NOTARY_PROFILE" >&2
+        echo "  if the profile does not exist yet: see the one-time store-credentials step in this script's header" >&2
+        exit 1
+    }
+}
+
+NAME="Hostflip-$VER"
+rm -rf "$DIST"
+mkdir -p "$DIST"
+
+echo "==> Notarization #1 (app) + staple"
+APP_ZIP="build/$NAME-notarize.zip"
+rm -f "$APP_ZIP"
+ditto -c -k --keepParent "$APP" "$APP_ZIP"
+notarize "$APP_ZIP" app
+xcrun stapler staple "$APP"
+xcrun stapler validate "$APP"
+spctl --assess --type execute "$APP" || \
+    { echo "error: Gatekeeper (execute) rejected Hostflip.app" >&2; exit 1; }
+
+echo "==> DMG (sign + notarization #2 + staple)"
+STAGE="build/dmg-stage"
+rm -rf "$STAGE"
+mkdir -p "$STAGE"
+cp -R "$APP" "$STAGE/"
+ln -s /Applications "$STAGE/Applications"
+hdiutil create -volname "$NAME" -srcfolder "$STAGE" -ov -format UDZO "$DIST/$NAME.dmg" >/dev/null
+codesign --force --timestamp --sign "$IDENTITY" "$DIST/$NAME.dmg"
+notarize "$DIST/$NAME.dmg" dmg
+xcrun stapler staple "$DIST/$NAME.dmg"
+xcrun stapler validate "$DIST/$NAME.dmg"
+spctl --assess --type open --context context:primary-signature "$DIST/$NAME.dmg" || \
+    { echo "error: Gatekeeper (open) rejected the DMG" >&2; exit 1; }
+
+if [ "$PUBLISH" -eq 0 ]; then
+    echo "==> Done (--no-publish, GitHub untouched): $DIST/$NAME.dmg"
+    exit 0
+fi
+
+echo "==> GitHub Release (upload as draft, publish once ready)"
+# Clean up a same-named draft left by a previous failed run (not externally
+# visible), avoiding duplicate drafts and ambiguous tag resolution.
+LEFTOVER_DRAFTS="$(gh release list --json tagName,isDraft \
+    --jq "[.[] | select(.isDraft and .tagName == \"v$VER\")] | length")"
+if [ "$LEFTOVER_DRAFTS" -gt 0 ]; then
+    gh release delete "v$VER" --yes
+fi
+# While a draft, the release is externally invisible and creates no tag; any
+# failure before publish leaves no public half-finished release behind.
+gh release create "v$VER" "$DIST/$NAME.dmg" \
+    --draft --title "v$VER" --generate-notes --target "$(git rev-parse HEAD)"
+gh release edit "v$VER" --draft=false
+
+echo "==> Homebrew tap (version + sha256)"
+scripts/update-tap.sh "$VER" "$DIST/$NAME.dmg"
+echo "==> Done: v$VER published, artifact $DIST/$NAME.dmg"

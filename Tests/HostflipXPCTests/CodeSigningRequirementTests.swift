@@ -1,0 +1,36 @@
+import XCTest
+@testable import HostflipXPC
+
+final class CodeSigningRequirementTests: XCTestCase {
+    func testBuildsDesignatedRequirementForPeer() throws {
+        let requirement = try CodeSigningRequirement.peerRequirement(
+            identifier: "com.heronapp.hostflip.daemon",
+            teamID: "ABCDE12345"
+        )
+
+        XCTAssertEqual(
+            requirement,
+            #"identifier "com.heronapp.hostflip.daemon" and anchor apple generic and certificate leaf[subject.OU] = "ABCDE12345""#
+        )
+    }
+
+    func testRejectsIdentifierWithCharactersOutsideBundleIDAlphabet() {
+        for identifier in [#"a"b"#, "a\"", "a b", "", "a\n.b"] {
+            XCTAssertThrowsError(
+                try CodeSigningRequirement.peerRequirement(identifier: identifier, teamID: "ABCDE12345")
+            ) { error in
+                XCTAssertEqual(error as? CodeSigningRequirementError, .invalidIdentifier(identifier))
+            }
+        }
+    }
+
+    func testRejectsMalformedTeamID() {
+        for teamID in ["", "abcde12345", "ABCDE1234", "ABCDE123456", #"ABCDE1234""#] {
+            XCTAssertThrowsError(
+                try CodeSigningRequirement.peerRequirement(identifier: "com.heronapp.hostflip", teamID: teamID)
+            ) { error in
+                XCTAssertEqual(error as? CodeSigningRequirementError, .invalidTeamID(teamID))
+            }
+        }
+    }
+}

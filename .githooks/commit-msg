@@ -1,0 +1,3 @@
+#!/bin/sh
+npx --yes -p @commitlint/cli@20 -p @commitlint/config-conventional@20 \
+  commitlint -x @commitlint/config-conventional --edit "$1"

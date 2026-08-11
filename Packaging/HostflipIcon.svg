@@ -1,0 +1,28 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#34373C"/>
+      <stop offset="1" stop-color="#212327"/>
+    </linearGradient>
+    <linearGradient id="post" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F8F8FA"/>
+      <stop offset="1" stop-color="#D9D9DE"/>
+    </linearGradient>
+    <linearGradient id="bar" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5CA4FF"/>
+      <stop offset="1" stop-color="#2264DC"/>
+    </linearGradient>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <g filter="url(#soft)">
+    <rect x="269" y="302" width="78" height="420" rx="39" fill="url(#post)"/>
+    <rect x="677" y="302" width="78" height="420" rx="39" fill="url(#post)"/>
+  </g>
+  <g transform="rotate(-13 512 512)" filter="url(#soft)">
+    <rect x="362" y="477" width="300" height="70" rx="35" fill="url(#bar)"/>
+  </g>
+  <circle cx="512" cy="512" r="26" fill="#FFFFFF"/>
+</svg>

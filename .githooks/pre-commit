@@ -1,0 +1,29 @@
+#!/bin/bash
+# Mixed-commit guard (docs/agents/public-sync.md): a single commit must not touch
+# both public-tree paths and internal paths, or cherry-picking it into the public
+# repository would drag internal files along.
+# The public repository has no docs/agents/public-sync.md, so this hook
+# deactivates itself there.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+[ -e docs/agents/public-sync.md ] || exit 0
+[ "${ALLOW_MIXED:-}" = "1" ] && exit 0
+
+# Public-tree include list — keep in sync with docs/agents/public-sync.md;
+# changing one requires changing the other.
+PUBLIC_RE='^(Sources/|Tests/|Packaging/|scripts/|\.githooks/|\.github/|Package\.swift$|LICENSE$|README\.md$|CONTEXT\.md$|\.gitignore$|docs/[A-Za-z0-9-]*-verification\.md$)'
+
+STAGED="$(git diff --cached --name-only)"
+PUB="$(echo "$STAGED" | grep -E "$PUBLIC_RE" || true)"
+INT="$(echo "$STAGED" | grep -Ev "$PUBLIC_RE" | grep -v '^$' || true)"
+
+if [ -n "$PUB" ] && [ -n "$INT" ]; then
+    echo "error: commit mixes public-tree and internal paths (see docs/agents/public-sync.md)" >&2
+    echo "  public tree:" >&2
+    echo "$PUB" | sed 's/^/    /' >&2
+    echo "  internal:" >&2
+    echo "$INT" | sed 's/^/    /' >&2
+    echo "Split into two commits; to force a mixed commit: ALLOW_MIXED=1 git commit … (such a commit must never enter the public repo)" >&2
+    exit 1
+fi

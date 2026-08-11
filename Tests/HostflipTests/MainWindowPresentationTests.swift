@@ -1,0 +1,131 @@
+import HostflipXPC
+import XCTest
+@testable import Hostflip
+
+final class MainWindowPresentationTests: XCTestCase {
+    func testPausedStateKeepsSavedSelectionsVisibleButNotEffective() {
+        let presentation = MainWindowPresentation(
+            isPaused: true,
+            hasHostsDrift: false,
+            helperStatus: .enabled,
+            switchFeedback: nil,
+            backgroundSyncError: nil,
+            profileCount: 2,
+            isSwitching: false
+        )
+
+        XCTAssertEqual(presentation.banner, .paused)
+        XCTAssertFalse(presentation.profilesAreEffective)
+        XCTAssertTrue(presentation.activationControlsDisabled)
+        XCTAssertFalse(presentation.showsEmptyState)
+    }
+
+    func testHostsDriftBlocksActivationAndTakesBannerPriority() {
+        let presentation = MainWindowPresentation(
+            isPaused: false,
+            hasHostsDrift: true,
+            helperStatus: .requiresApproval,
+            switchFeedback: .merged,
+            backgroundSyncError: "Background sync failed",
+            profileCount: 2,
+            isSwitching: false
+        )
+
+        XCTAssertEqual(presentation.banner, .hostsDrift)
+        XCTAssertTrue(presentation.profilesAreEffective)
+        XCTAssertTrue(presentation.activationControlsDisabled)
+        XCTAssertFalse(presentation.showsSwitchSuccess)
+    }
+
+    func testApprovalRequiredIsActionableWithoutDisablingLocalEditing() {
+        let presentation = MainWindowPresentation(
+            isPaused: false,
+            hasHostsDrift: false,
+            helperStatus: .requiresApproval,
+            switchFeedback: nil,
+            backgroundSyncError: nil,
+            profileCount: 2,
+            isSwitching: false
+        )
+
+        XCTAssertEqual(presentation.banner, .approvalRequired)
+        XCTAssertTrue(presentation.profilesAreEffective)
+        XCTAssertFalse(presentation.activationControlsDisabled)
+    }
+
+    func testEmptyWorkspaceShowsCreationStateWithoutAWarningBanner() {
+        let presentation = MainWindowPresentation(
+            isPaused: false,
+            hasHostsDrift: false,
+            helperStatus: .notRegistered,
+            switchFeedback: nil,
+            backgroundSyncError: nil,
+            profileCount: 0,
+            isSwitching: false
+        )
+
+        XCTAssertNil(presentation.banner)
+        XCTAssertTrue(presentation.showsEmptyState)
+        XCTAssertFalse(presentation.activationControlsDisabled)
+    }
+
+    func testSwitchFeedbackIsPresentedAheadOfTheSteadyStateBanner() {
+        let feedback = SwitchFeedback.failed("Could not update system hosts")
+        let presentation = MainWindowPresentation(
+            isPaused: true,
+            hasHostsDrift: false,
+            helperStatus: .enabled,
+            switchFeedback: feedback,
+            backgroundSyncError: "Background sync failed",
+            profileCount: 2,
+            isSwitching: false
+        )
+
+        XCTAssertEqual(presentation.banner, .switchFeedback(feedback))
+    }
+
+    func testSuccessfulSwitchUsesTransientToolbarFeedbackInsteadOfAFullWidthBanner() {
+        let presentation = MainWindowPresentation(
+            isPaused: false,
+            hasHostsDrift: false,
+            helperStatus: .enabled,
+            switchFeedback: .merged,
+            backgroundSyncError: nil,
+            profileCount: 2,
+            isSwitching: false
+        )
+
+        XCTAssertNil(presentation.banner)
+        XCTAssertTrue(presentation.showsSwitchSuccess)
+    }
+
+    func testBaseHostsReplacementUsesDedicatedBannerInsteadOfHostsUpdatedFeedback() {
+        let presentation = MainWindowPresentation(
+            isPaused: false,
+            hasHostsDrift: false,
+            helperStatus: .notRegistered,
+            switchFeedback: .baseHostsReplaced,
+            backgroundSyncError: nil,
+            profileCount: 0,
+            isSwitching: false
+        )
+
+        XCTAssertEqual(presentation.banner, .switchFeedback(.baseHostsReplaced))
+        XCTAssertFalse(presentation.showsSwitchSuccess)
+    }
+
+    func testBackgroundSyncErrorUsesBannerAheadOfPausedState() {
+        let message = "Changes were saved locally, but system hosts could not be updated."
+        let presentation = MainWindowPresentation(
+            isPaused: true,
+            hasHostsDrift: false,
+            helperStatus: .enabled,
+            switchFeedback: nil,
+            backgroundSyncError: message,
+            profileCount: 2,
+            isSwitching: false
+        )
+
+        XCTAssertEqual(presentation.banner, .backgroundSyncError(message))
+    }
+}
