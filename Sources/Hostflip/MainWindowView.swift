@@ -537,6 +537,12 @@ struct MainWindowView: View {
         profilePendingNameFocus = profileID
     }
 
+    private func createProfile(in groupID: HostflipCore.Group.ID) {
+        guard let profileID = store.createProfile(in: groupID) else { return }
+        selection = .profile(profileID)
+        profilePendingNameFocus = profileID
+    }
+
 
     private func createGroup() {
         guard let groupID = store.createGroup(),
@@ -638,6 +644,10 @@ struct MainWindowView: View {
 
     @ViewBuilder
     private func groupActionButtons(_ group: HostflipCore.Group, index: Int) -> some View {
+        Button("New Profile") {
+            createProfile(in: group.id)
+        }
+        Divider()
         Button("Rename Group…") {
             beginRenaming(group)
         }

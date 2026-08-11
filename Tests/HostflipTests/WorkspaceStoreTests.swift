@@ -123,6 +123,21 @@ final class WorkspaceStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testCreateProfileInGroupLandsInGroupAndPersists() throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub())
+        let groupID = try XCTUnwrap(store.createGroup())
+
+        let profileID = try XCTUnwrap(store.createProfile(in: groupID))
+
+        XCTAssertEqual(store.standaloneProfiles, [])
+        XCTAssertEqual(store.groups.first?.profiles.map(\.id), [profileID])
+        XCTAssertFalse(store.isActive(profileID))
+
+        let reloaded = try reloadModel()
+        XCTAssertEqual(reloaded.groups.first?.profiles.map(\.id), [profileID])
+    }
+
+    @MainActor
     func testCreateStandaloneProfileAvoidsDuplicateDefaultNames() throws {
         let store = makeStore(coordinator: SwitchCoordinatingStub())
 
