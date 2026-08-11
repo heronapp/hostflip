@@ -168,7 +168,7 @@ struct HelperMaintenanceView: View {
                 Task { await maintenanceStore.removeHelper() }
             }
         } message: {
-            Text("hostflip will remove its privileged helper. Your profiles and base hosts will stay in the workspace. The helper will be requested again on your next switch.")
+            Text("hostflip will remove its privileged helper. Your profiles and base hosts will stay in the workspace. The helper will be requested again on your next switch.\n\nThe system hosts file keeps its current content — entries from active profiles stay in effect. To leave only Base Hosts applied (e.g. before uninstalling), turn off the master switch first.")
         }
     }
 
