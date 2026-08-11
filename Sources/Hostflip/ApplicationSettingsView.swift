@@ -4,6 +4,7 @@ import SwiftUI
 
 struct ApplicationSettingsView: View {
     let dockIconStore: DockIconVisibilityStore
+    let launchAtLoginStore: LaunchAtLoginStore
     let updater: SPUUpdater
 
     var body: some View {
@@ -24,6 +25,15 @@ struct ApplicationSettingsView: View {
                 Text("The menu bar icon is always shown.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
+
+                Toggle("Launch at Login", isOn: Binding(
+                    get: { launchAtLoginStore.isEnabled },
+                    set: { launchAtLoginStore.setEnabled($0) }
+                ))
+
+                Text("hostflip starts silently in the menu bar when you log in.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
             .padding(20)
             .tabItem {
@@ -36,7 +46,7 @@ struct ApplicationSettingsView: View {
                     Label("Updates", systemImage: "arrow.triangle.2.circlepath")
                 }
         }
-        .frame(width: 460, height: 150)
+        .frame(width: 460, height: 190)
     }
 }
 

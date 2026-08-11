@@ -12,6 +12,7 @@ struct HostflipApp: App {
     private let store: WorkspaceStore
     private let maintenanceStore: MaintenanceStore
     private let dockIconStore: DockIconVisibilityStore
+    private let launchAtLoginStore = LaunchAtLoginStore()
     /// Sparkle owns the whole update pipeline (scheduled checks, download, install, relaunch); see ADR-0007.
     private let updaterController: SPUStandardUpdaterController
 
@@ -62,7 +63,11 @@ struct HostflipApp: App {
         .defaultSize(width: 820, height: 560)
 
         Settings {
-            ApplicationSettingsView(dockIconStore: dockIconStore, updater: updaterController.updater)
+            ApplicationSettingsView(
+                dockIconStore: dockIconStore,
+                launchAtLoginStore: launchAtLoginStore,
+                updater: updaterController.updater
+            )
         }
     }
 }

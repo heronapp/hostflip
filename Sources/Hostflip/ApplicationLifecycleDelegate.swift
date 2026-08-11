@@ -7,6 +7,9 @@ final class ApplicationLifecycleDelegate: NSObject, NSApplicationDelegate {
     private var opensMainWindowWhenReady = false
 
     func applicationDidFinishLaunching(_: Notification) {
+        // A login-item launch stays silent in the menu bar (#37); direct launches
+        // (Finder, Spotlight, Dock) keep opening the main window.
+        guard !LoginItemLaunch.isCurrent else { return }
         requestMainWindow()
     }
 
