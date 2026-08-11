@@ -34,7 +34,6 @@ final class MainWindowPresentationTests: XCTestCase {
         XCTAssertEqual(presentation.banner, .hostsDrift)
         XCTAssertTrue(presentation.profilesAreEffective)
         XCTAssertTrue(presentation.activationControlsDisabled)
-        XCTAssertFalse(presentation.showsSwitchSuccess)
     }
 
     func testApprovalRequiredIsActionableWithoutDisablingLocalEditing() {
@@ -84,7 +83,7 @@ final class MainWindowPresentationTests: XCTestCase {
         XCTAssertEqual(presentation.banner, .switchFeedback(feedback))
     }
 
-    func testSuccessfulSwitchUsesTransientToolbarFeedbackInsteadOfAFullWidthBanner() {
+    func testSuccessfulSwitchDoesNotUseAWarningBanner() {
         let presentation = MainWindowPresentation(
             isPaused: false,
             hasHostsDrift: false,
@@ -96,7 +95,6 @@ final class MainWindowPresentationTests: XCTestCase {
         )
 
         XCTAssertNil(presentation.banner)
-        XCTAssertTrue(presentation.showsSwitchSuccess)
     }
 
     func testBaseHostsReplacementUsesDedicatedBannerInsteadOfHostsUpdatedFeedback() {
@@ -111,7 +109,6 @@ final class MainWindowPresentationTests: XCTestCase {
         )
 
         XCTAssertEqual(presentation.banner, .switchFeedback(.baseHostsReplaced))
-        XCTAssertFalse(presentation.showsSwitchSuccess)
     }
 
     func testBackgroundSyncErrorUsesBannerAheadOfPausedState() {

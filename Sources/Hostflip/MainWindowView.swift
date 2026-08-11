@@ -275,14 +275,6 @@ struct MainWindowView: View {
                 HelperToolbarControl(store: store, maintenanceStore: maintenanceStore)
             }
 
-            if presentation.showsSwitchSuccess {
-                ToolbarItem(placement: .automatic) {
-                    Label("Hosts Updated", systemImage: "checkmark.circle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.green)
-                }
-            }
-
             ToolbarItem(placement: .automatic) {
                 Toggle("Enable hostflip", isOn: Binding(
                     get: { !store.isPaused },
@@ -299,9 +291,7 @@ struct MainWindowView: View {
             .hidingSharedBackgroundWhenAvailable()
         }
         .background {
-            NativeToolbarFlexibleSpace(
-                trailingItemCount: presentation.showsSwitchSuccess ? 2 : 1
-            )
+            NativeToolbarFlexibleSpace(trailingItemCount: 1)
         }
         .confirmationDialog(
             "Delete “\(profilePendingDeletion?.name ?? "")”?",

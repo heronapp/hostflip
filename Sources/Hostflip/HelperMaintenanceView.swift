@@ -1,7 +1,7 @@
 import HostflipXPC
 import SwiftUI
 
-private struct HelperStatusPresentation {
+struct HelperStatusPresentation {
     let title: String
     let description: String
     let color: Color
@@ -22,16 +22,16 @@ private struct HelperStatusPresentation {
             color = .orange
             canRemove = true
             canOpenApprovalSettings = true
-        case .notRegistered:
+        case .notRegistered, .notFound:
+            // SMAppService reports .notFound for a daemon that was never
+            // registered (docs/helper-reregistration-verification.md step 1), so
+            // both states are the pristine "not installed yet" condition —
+            // registration is lazily triggered by the first switch (ADR-0002).
+            // A genuinely broken install (wrong location, policy block) surfaces
+            // through switch feedback, not through this passive light.
             title = "Helper Not Installed"
             description = "Switch a profile to install the helper. macOS may ask you to approve it."
             color = .secondary
-            canRemove = false
-            canOpenApprovalSettings = false
-        case .notFound:
-            title = "Helper Unavailable"
-            description = "The helper is unavailable. Move hostflip to Applications or reinstall the app."
-            color = .red
             canRemove = false
             canOpenApprovalSettings = false
         case nil:
