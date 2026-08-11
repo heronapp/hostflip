@@ -1,6 +1,7 @@
 import AppKit
 import HostflipCore
 import HostflipXPC
+import Sparkle
 import SwiftUI
 
 /// Menu bar quick switching (#23) + main window (#20).
@@ -11,18 +12,22 @@ struct HostflipApp: App {
     private let store: WorkspaceStore
     private let maintenanceStore: MaintenanceStore
     private let dockIconStore: DockIconVisibilityStore
+    /// Sparkle owns the whole update pipeline (scheduled checks, download, install, relaunch); see ADR-0007.
+    private let updaterController: SPUStandardUpdaterController
 
     init() {
         let dockIconStore = DockIconVisibilityStore()
         let registrar = DaemonRegistrar()
         let store = WorkspaceStore(registrar: registrar)
-        let releaseClient = GitHubReleaseClient()
         let maintenanceStore = MaintenanceStore(
             currentVersion: HostflipBuild.version,
             helperStatus: { await registrar.refreshStatus() },
-            unregisterHelper: { try await registrar.unregister() },
-            latestRelease: { try await releaseClient.latestRelease() },
-            openRelease: { NSWorkspace.shared.open($0) }
+            unregisterHelper: { try await registrar.unregister() }
+        )
+        updaterController = SPUStandardUpdaterController(
+            startingUpdater: true,
+            updaterDelegate: nil,
+            userDriverDelegate: nil
         )
         store.loadIfNeeded()
         self.store = store
@@ -47,7 +52,7 @@ struct HostflipApp: App {
         .menuBarExtraStyle(.menu)
 
         Window("hostflip", id: "main") {
-            MainWindowView(store: store, maintenanceStore: maintenanceStore)
+            MainWindowView(store: store, maintenanceStore: maintenanceStore, updater: updaterController.updater)
                 .onAppear {
                     dockIconStore.mainWindowDidOpen()
                 }

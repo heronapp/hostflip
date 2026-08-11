@@ -15,17 +15,35 @@ APP="build/Hostflip.app"
 swift build -c release
 
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Library/LaunchDaemons"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Library/LaunchDaemons" \
+    "$APP/Contents/Frameworks"
 cp "$BIN/Hostflip" "$APP/Contents/MacOS/Hostflip"
 cp "$BIN/hostflipd" "$APP/Contents/MacOS/hostflipd"
 cp Packaging/HostflipApp-Info.plist "$APP/Contents/Info.plist"
 cp Packaging/Hostflip.icns "$APP/Contents/Resources/Hostflip.icns"
 cp Packaging/com.heronapp.hostflip.daemon.plist "$APP/Contents/Library/LaunchDaemons/"
+# SwiftPM places the Sparkle binary artifact next to the built products; the app
+# links it via @rpath, which only resolves once Contents/Frameworks is on the path.
+ditto "$BIN/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
+install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/Hostflip"
 
 # A real certificate adds a secure timestamp (hard requirement for notarization);
 # ad-hoc signatures do not support timestamps.
 TIMESTAMP_FLAG=""
 if [ "$IDENTITY" != "-" ]; then TIMESTAMP_FLAG="--timestamp"; fi
+
+# Re-sign Sparkle inside-out with our identity (the prebuilt framework carries
+# Sparkle's), per https://sparkle-project.org/documentation/sandboxing/ — no --deep.
+FRAMEWORK="$APP/Contents/Frameworks/Sparkle.framework"
+codesign --force --options runtime $TIMESTAMP_FLAG \
+    --sign "$IDENTITY" "$FRAMEWORK/Versions/B/XPCServices/Installer.xpc"
+codesign --force --options runtime $TIMESTAMP_FLAG --preserve-metadata=entitlements \
+    --sign "$IDENTITY" "$FRAMEWORK/Versions/B/XPCServices/Downloader.xpc"
+codesign --force --options runtime $TIMESTAMP_FLAG \
+    --sign "$IDENTITY" "$FRAMEWORK/Versions/B/Autoupdate"
+codesign --force --options runtime $TIMESTAMP_FLAG \
+    --sign "$IDENTITY" "$FRAMEWORK/Versions/B/Updater.app"
+codesign --force --options runtime $TIMESTAMP_FLAG --sign "$IDENTITY" "$FRAMEWORK"
 
 # Sign the embedded daemon first (displaced nested code), then the whole bundle.
 # The daemon is not a bundle, so its signing identifier must be set explicitly.

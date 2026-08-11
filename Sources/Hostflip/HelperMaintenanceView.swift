@@ -1,4 +1,5 @@
 import HostflipXPC
+import Sparkle
 import SwiftUI
 
 struct HelperStatusPresentation {
@@ -64,6 +65,7 @@ struct HelperStatusLabel: View {
 struct HelperMaintenanceView: View {
     let store: WorkspaceStore
     let maintenanceStore: MaintenanceStore
+    let updater: SPUUpdater
     let onDismiss: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
     @State private var isConfirmingRemoval = false
@@ -71,10 +73,12 @@ struct HelperMaintenanceView: View {
     init(
         store: WorkspaceStore,
         maintenanceStore: MaintenanceStore,
+        updater: SPUUpdater,
         onDismiss: (() -> Void)? = nil
     ) {
         self.store = store
         self.maintenanceStore = maintenanceStore
+        self.updater = updater
         self.onDismiss = onDismiss
     }
 
@@ -126,15 +130,8 @@ struct HelperMaintenanceView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                if maintenanceStore.isCheckingForUpdates {
-                    ProgressView()
-                        .controlSize(.small)
-                }
-                Button("Check for Updates") {
-                    Task { await maintenanceStore.checkForUpdates() }
-                }
-                .controlSize(.small)
-                .disabled(maintenanceStore.isCheckingForUpdates)
+                CheckForUpdatesButton(updater: updater)
+                    .controlSize(.small)
             }
 
             if let feedback = maintenanceStore.feedback {
@@ -185,5 +182,34 @@ struct HelperMaintenanceView: View {
         } else {
             dismiss()
         }
+    }
+}
+
+/// Sparkle drives the whole check-and-install flow with its own UI; this button only forwards the
+/// click and mirrors `canCheckForUpdates` (false while a check or install is already in flight).
+struct CheckForUpdatesButton: View {
+    @ObservedObject private var viewModel: CheckForUpdatesViewModel
+    private let updater: SPUUpdater
+
+    init(updater: SPUUpdater) {
+        self.updater = updater
+        viewModel = CheckForUpdatesViewModel(updater: updater)
+    }
+
+    var body: some View {
+        Button("Check for Updates") {
+            updater.checkForUpdates()
+        }
+        .disabled(!viewModel.canCheckForUpdates)
+    }
+}
+
+@MainActor
+final class CheckForUpdatesViewModel: ObservableObject {
+    @Published var canCheckForUpdates = false
+
+    init(updater: SPUUpdater) {
+        updater.publisher(for: \.canCheckForUpdates)
+            .assign(to: &$canCheckForUpdates)
     }
 }

@@ -29,6 +29,13 @@ NOTARY_PROFILE="${NOTARY_PROFILE:-hostflip-notary}"
 PLIST=Packaging/HostflipApp-Info.plist
 DIST=build/dist
 
+# Sparkle command-line tools (generate_appcast), pinned and cached per version.
+# The EdDSA key lives in the release machine's Keychain under the dedicated
+# account "hostflip" (created once with: generate_keys --account hostflip).
+SPARKLE_VERSION=2.9.5
+SPARKLE_SHA256=015336b601493e05c237964954bff6191370003d94edefe663724c88840d73cc
+SPARKLE_TOOLS="${SPARKLE_TOOLS:-$HOME/Library/Caches/hostflip/sparkle-tools-$SPARKLE_VERSION}"
+
 echo "==> Pre-release guards"
 # Full dirty check including untracked files: they never enter the artifact, but
 # they blur which commit the artifact corresponds to.
@@ -82,6 +89,21 @@ if [ "$PUBLISH" -eq 1 ]; then
         { echo "error: local HEAD does not match origin/main (push first, then release)" >&2; exit 1; }
 fi
 
+echo "==> Sparkle tools (generate_appcast $SPARKLE_VERSION)"
+if [ ! -x "$SPARKLE_TOOLS/bin/generate_appcast" ]; then
+    SPARKLE_TMP="$(mktemp -d)"
+    curl -fsSL -o "$SPARKLE_TMP/sparkle.tar.xz" \
+        "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz"
+    echo "$SPARKLE_SHA256  $SPARKLE_TMP/sparkle.tar.xz" | shasum -a 256 -c - >/dev/null || \
+        { echo "error: Sparkle tools download does not match the pinned sha256" >&2; exit 1; }
+    mkdir -p "$SPARKLE_TOOLS"
+    tar -xJf "$SPARKLE_TMP/sparkle.tar.xz" -C "$SPARKLE_TOOLS"
+    rm -rf "$SPARKLE_TMP"
+fi
+# The dedicated key must exist before the pipeline invests in a build.
+security find-generic-password -a hostflip -s "https://sparkle-project.org" >/dev/null 2>&1 || \
+    { echo "error: no Sparkle EdDSA key for account \"hostflip\" in the Keychain (one-time: generate_keys --account hostflip)" >&2; exit 1; }
+
 echo "==> Clean build + signing (${IDENTITY})"
 swift package clean
 CODESIGN_IDENTITY="$IDENTITY" scripts/build-app.sh
@@ -89,7 +111,14 @@ APP=build/Hostflip.app
 
 echo "==> Signature acceptance gate (per object, every check is a hard failure)"
 codesign --verify --deep --strict "$APP"
-for T in "$APP/Contents/MacOS/Hostflip" "$APP/Contents/MacOS/hostflipd" "$APP"; do
+FRAMEWORK="$APP/Contents/Frameworks/Sparkle.framework"
+for T in "$APP/Contents/MacOS/Hostflip" "$APP/Contents/MacOS/hostflipd" \
+    "$FRAMEWORK/Versions/B/XPCServices/Installer.xpc" \
+    "$FRAMEWORK/Versions/B/XPCServices/Downloader.xpc" \
+    "$FRAMEWORK/Versions/B/Autoupdate" \
+    "$FRAMEWORK/Versions/B/Updater.app" \
+    "$FRAMEWORK" \
+    "$APP"; do
     INFO="$(codesign -dvv "$T" 2>&1)" || \
         { printf '%s\n' "$INFO" >&2; echo "error: codesign -dvv failed: $T" >&2; exit 1; }
     echo "$INFO" | grep -q "TeamIdentifier=$TEAM_ID" || \
@@ -147,6 +176,15 @@ xcrun stapler validate "$DIST/$NAME.dmg"
 spctl --assess --type open --context context:primary-signature "$DIST/$NAME.dmg" || \
     { echo "error: Gatekeeper (open) rejected the DMG" >&2; exit 1; }
 
+echo "==> Appcast (EdDSA-signed enclosure for the Sparkle feed)"
+"$SPARKLE_TOOLS/bin/generate_appcast" --account hostflip \
+    --download-url-prefix "https://github.com/heronapp/hostflip/releases/download/v$VER/" \
+    -o "$DIST/appcast.xml" "$DIST"
+grep -q "<sparkle:shortVersionString>$VER</sparkle:shortVersionString>" "$DIST/appcast.xml" || \
+    { echo "error: appcast.xml does not contain version $VER" >&2; exit 1; }
+grep -q "sparkle:edSignature=" "$DIST/appcast.xml" || \
+    { echo "error: appcast.xml enclosure carries no EdDSA signature" >&2; exit 1; }
+
 if [ "$PUBLISH" -eq 0 ]; then
     echo "==> Done (--no-publish, GitHub untouched): $DIST/$NAME.dmg"
     exit 0
@@ -162,7 +200,9 @@ if [ "$LEFTOVER_DRAFTS" -gt 0 ]; then
 fi
 # While a draft, the release is externally invisible and creates no tag; any
 # failure before publish leaves no public half-finished release behind.
-gh release create "v$VER" "$DIST/$NAME.dmg" \
+# appcast.xml rides every release: SUFeedURL resolves it through the stable
+# releases/latest/download redirect, so the newest release's copy is the feed.
+gh release create "v$VER" "$DIST/$NAME.dmg" "$DIST/appcast.xml" \
     --draft --title "v$VER" --generate-notes --target "$(git rev-parse HEAD)"
 gh release edit "v$VER" --draft=false
 

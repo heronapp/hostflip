@@ -24,5 +24,9 @@
 	<true/>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>SUFeedURL</key>
+	<string>https://github.com/heronapp/hostflip/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>YGCsK/WvtGmlrN0HdghXbj/AlE1BErbfHpob048oOzU=</string>
 </dict>
 </plist>
