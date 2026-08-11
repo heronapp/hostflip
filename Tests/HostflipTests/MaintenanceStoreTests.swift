@@ -78,7 +78,6 @@ final class MaintenanceStoreTests: XCTestCase {
     @MainActor
     private func makeStore(helper: HelperMaintenanceStub) -> MaintenanceStore {
         MaintenanceStore(
-            currentVersion: "0.9.0",
             helperStatus: { await helper.currentStatus() },
             unregisterHelper: { try await helper.unregister() }
         )

@@ -34,16 +34,13 @@ final class MaintenanceStore {
     private(set) var feedback: MaintenanceFeedback?
     private(set) var isRemovingHelper = false
 
-    let currentVersion: String
     private let loadHelperStatus: @Sendable () async -> DaemonRegistrationStatus
     private let unregisterHelper: @Sendable () async throws -> Void
 
     init(
-        currentVersion: String,
         helperStatus: @escaping @Sendable () async -> DaemonRegistrationStatus,
         unregisterHelper: @escaping @Sendable () async throws -> Void
     ) {
-        self.currentVersion = currentVersion
         loadHelperStatus = helperStatus
         self.unregisterHelper = unregisterHelper
     }

@@ -1,6 +1,5 @@
 import AppKit
 import HostflipCore
-import Sparkle
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -176,7 +175,6 @@ struct MainWindowView: View {
 
     let store: WorkspaceStore
     let maintenanceStore: MaintenanceStore
-    let updater: SPUUpdater
     @Environment(\.scenePhase) private var scenePhase
     @State private var selection: SidebarItem? = .baseHosts
     /// The profile pending deletion confirmation; a non-nil value shows the confirmation dialog.
@@ -274,7 +272,7 @@ struct MainWindowView: View {
         }
         .toolbar {
             ToolbarItem(placement: .automatic) {
-                HelperToolbarControl(store: store, maintenanceStore: maintenanceStore, updater: updater)
+                HelperToolbarControl(store: store, maintenanceStore: maintenanceStore)
             }
 
             ToolbarItem(placement: .automatic) {
@@ -836,12 +834,11 @@ struct MainWindowView: View {
 private struct HelperToolbarControl: View {
     let store: WorkspaceStore
     let maintenanceStore: MaintenanceStore
-    let updater: SPUUpdater
     @State private var popoverPresenter = HelperPopoverPresenter()
 
     var body: some View {
         Button {
-            popoverPresenter.toggle(store: store, maintenanceStore: maintenanceStore, updater: updater)
+            popoverPresenter.toggle(store: store, maintenanceStore: maintenanceStore)
         } label: {
             HelperStatusLabel(status: maintenanceStore.helperStatus)
                 .padding(.horizontal, 12)
@@ -859,7 +856,7 @@ private final class HelperPopoverPresenter: NSObject, NSPopoverDelegate {
     weak var anchorView: NSView?
     private var popover: NSPopover?
 
-    func toggle(store: WorkspaceStore, maintenanceStore: MaintenanceStore, updater: SPUUpdater) {
+    func toggle(store: WorkspaceStore, maintenanceStore: MaintenanceStore) {
         if popover?.isShown == true {
             close()
             return
@@ -873,7 +870,6 @@ private final class HelperPopoverPresenter: NSObject, NSPopoverDelegate {
             rootView: HelperMaintenanceView(
                 store: store,
                 maintenanceStore: maintenanceStore,
-                updater: updater,
                 onDismiss: { [weak self] in self?.close() }
             )
         )

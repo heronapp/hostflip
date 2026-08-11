@@ -20,7 +20,6 @@ struct HostflipApp: App {
         let registrar = DaemonRegistrar()
         let store = WorkspaceStore(registrar: registrar)
         let maintenanceStore = MaintenanceStore(
-            currentVersion: HostflipBuild.version,
             helperStatus: { await registrar.refreshStatus() },
             unregisterHelper: { try await registrar.unregister() }
         )
@@ -52,7 +51,7 @@ struct HostflipApp: App {
         .menuBarExtraStyle(.menu)
 
         Window("hostflip", id: "main") {
-            MainWindowView(store: store, maintenanceStore: maintenanceStore, updater: updaterController.updater)
+            MainWindowView(store: store, maintenanceStore: maintenanceStore)
                 .onAppear {
                     dockIconStore.mainWindowDidOpen()
                 }
@@ -63,7 +62,7 @@ struct HostflipApp: App {
         .defaultSize(width: 820, height: 560)
 
         Settings {
-            ApplicationSettingsView(dockIconStore: dockIconStore)
+            ApplicationSettingsView(dockIconStore: dockIconStore, updater: updaterController.updater)
         }
     }
 }
