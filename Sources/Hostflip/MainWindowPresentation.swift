@@ -16,7 +16,6 @@ struct MainWindowPresentation: Equatable {
     let profilesAreEffective: Bool
     let activationControlsDisabled: Bool
     let showsEmptyState: Bool
-    let showsSwitchSuccess: Bool
 
     init(
         isPaused: Bool,
@@ -43,6 +42,5 @@ struct MainWindowPresentation: Equatable {
         self.profilesAreEffective = !isPaused
         self.activationControlsDisabled = isPaused || hasHostsDrift || isSwitching
         self.showsEmptyState = profileCount == 0
-        self.showsSwitchSuccess = switchFeedback == .merged && !hasHostsDrift
     }
 }
