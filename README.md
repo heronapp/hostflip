@@ -17,6 +17,12 @@ Editing `/etc/hosts` by hand — or typing your password every time a hosts mana
 - **External edits are respected, not clobbered.** If anything else modifies `/etc/hosts`, hostflip detects the drift and walks you through reconciling it in a diff view before it writes again.
 - **Pause everything.** One master switch restores your baseline hosts while remembering every profile's state.
 
+<p align="center">
+  <img src="docs/screenshots/menu-bar.png" width="343" alt="Quick switching from the menu bar: groups as submenus, one active profile per group">
+</p>
+
+![Drift review: external changes to the system hosts shown as a diff before reconciling](docs/screenshots/drift-review.png)
+
 ## Install
 
 **Homebrew**
