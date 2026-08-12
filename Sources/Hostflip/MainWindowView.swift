@@ -1090,14 +1090,25 @@ private struct HostsDriftReviewSheet: View {
                             Spacer()
                         }
 
-                        ScrollView([.horizontal, .vertical]) {
-                            LazyVStack(alignment: .leading, spacing: 0) {
-                                ForEach(Array(comparison.diffRows.enumerated()), id: \.offset) { _, row in
-                                    diffRow(row)
+                        GeometryReader { viewport in
+                            ScrollView([.horizontal, .vertical]) {
+                                // A lazy stack collapses to a near-zero width proposal inside a
+                                // horizontal-axis ScrollView, wrapping every row character by character.
+                                VStack(alignment: .leading, spacing: 0) {
+                                    ForEach(Array(comparison.diffRows.enumerated()), id: \.offset) { _, row in
+                                        diffRow(row)
+                                    }
                                 }
+                                // A two-axis ScrollView centers undersized content; proposing at
+                                // least the viewport pins the rows top-leading and stripes them
+                                // across the full width.
+                                .frame(
+                                    minWidth: viewport.size.width,
+                                    minHeight: viewport.size.height,
+                                    alignment: .topLeading
+                                )
+                                .textSelection(.enabled)
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
                         }
                         .background(.background.secondary, in: RoundedRectangle(cornerRadius: 8))
 
@@ -1203,6 +1214,7 @@ private struct HostsDriftReviewSheet: View {
                 .frame(width: 12)
             Text(row.text.isEmpty ? " " : row.text)
                 .foregroundStyle(.primary)
+                .fixedSize(horizontal: true, vertical: false)
         }
         .font(.system(.body, design: .monospaced))
         .padding(.horizontal, 10)
