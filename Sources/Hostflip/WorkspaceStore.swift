@@ -53,6 +53,12 @@ enum HostsReconciliationChoice {
     case later
 }
 
+/// Result of one import (#40): either every file was applied, or none was.
+enum ImportOutcome: Equatable {
+    case imported
+    case failed(String)
+}
+
 /// Domain state for the main window (#20/#21/#22): opens the workspace, shows hosts, manages profiles and groups.
 /// Saving does not go through the helper — every edit is written to disk synchronously, leaving no
 /// window for loss; when already approved, a debounced follow-up merge runs separately
@@ -139,7 +145,7 @@ final class WorkspaceStore {
         self.readSystemHosts = readSystemHosts
     }
 
-    /// Idempotent open: the first call imports or restores the workspace; later calls reuse the in-memory model.
+    /// Idempotent open: the first call captures or restores the workspace; later calls reuse the in-memory model.
     func loadIfNeeded() {
         guard model == nil, loadError == nil else { return }
         do {
@@ -685,6 +691,74 @@ final class WorkspaceStore {
         guard refreshed != hostsDriftComparison else { return }
         hostsDriftComparison = refreshed
         hostsDriftGeneration &+= 1
+    }
+
+    // MARK: - Import / Export (#40, ADR-0008)
+
+    /// Every file is parsed and validated before anything is applied, so one bad file means zero
+    /// change. Imported content lands inactive, making this a purely local edit: it must not go
+    /// through applyEdit, whose follow-up merge would touch the system hosts. The in-memory model
+    /// is committed only after the workspace save succeeds.
+    func importFiles(at urls: [URL]) -> ImportOutcome {
+        guard var updated = model else {
+            return .failed("Nothing was imported: the workspace is not loaded.")
+        }
+        do {
+            let contents = try urls.map { url in
+                do {
+                    return try ImportReader.read(
+                        data: Data(contentsOf: url),
+                        fileName: url.lastPathComponent
+                    )
+                } catch {
+                    throw ImportFileFailure(fileName: url.lastPathComponent, underlying: error)
+                }
+            }
+            for content in contents {
+                switch content {
+                case .snapshot(let snapshot):
+                    try updated.importSnapshot(snapshot)
+                case .plainText(let name, let text):
+                    try updated.addProfile(id: Profile.ID(UUID().uuidString), name: name, content: text)
+                }
+            }
+            try workspace.save(updated)
+            model = updated
+            return .imported
+        } catch {
+            return .failed(Self.importFailureMessage(for: error))
+        }
+    }
+
+    /// A portable snapshot of every profile and the group structure; Base Hosts and active state
+    /// stay on this machine. Nil until the workspace has loaded.
+    func exportSnapshotData() throws -> Data? {
+        guard let model else { return nil }
+        return try ExportSnapshot(of: model).encoded()
+    }
+
+    private struct ImportFileFailure: Error {
+        let fileName: String
+        let underlying: any Error
+    }
+
+    private static func importFailureMessage(for error: any Error) -> String {
+        guard let failure = error as? ImportFileFailure else {
+            return "Nothing was imported: \(error)"
+        }
+        let reason = switch failure.underlying as? ImportError {
+        case .unsupportedVersion(let version):
+            "this file was created by a newer version of hostflip (format version \(version))"
+        case .malformedSnapshot:
+            "this file is JSON but not a valid hostflip export"
+        case .blankName:
+            "the export contains a profile or group with an empty name"
+        case .invalidTextEncoding:
+            "this file is not UTF-8 text"
+        case nil:
+            "\(failure.underlying)"
+        }
+        return "Nothing was imported. \(failure.fileName): \(reason)."
     }
 
     // MARK: - Persisting and follow-up merging
