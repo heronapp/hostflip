@@ -1091,7 +1091,9 @@ private struct HostsDriftReviewSheet: View {
                         }
 
                         ScrollView([.horizontal, .vertical]) {
-                            LazyVStack(alignment: .leading, spacing: 0) {
+                            // A lazy stack collapses to a near-zero width proposal inside a
+                            // horizontal-axis ScrollView, wrapping every row character by character.
+                            VStack(alignment: .leading, spacing: 0) {
                                 ForEach(Array(comparison.diffRows.enumerated()), id: \.offset) { _, row in
                                     diffRow(row)
                                 }
@@ -1203,6 +1205,7 @@ private struct HostsDriftReviewSheet: View {
                 .frame(width: 12)
             Text(row.text.isEmpty ? " " : row.text)
                 .foregroundStyle(.primary)
+                .fixedSize(horizontal: true, vertical: false)
         }
         .font(.system(.body, design: .monospaced))
         .padding(.horizontal, 10)
