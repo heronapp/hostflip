@@ -3,15 +3,15 @@ import Foundation
 /// hostflip's persistent workspace (defaults to `~/Library/Application Support/hostflip/`).
 ///
 /// Directory layout (see the ticket #4 resolution):
-/// - `hosts.orig`: pristine backup of the system hosts taken at first import; kept forever, never rewritten
+/// - `hosts.orig`: pristine backup of the system hosts taken at first capture; kept forever, never rewritten
 /// - `base.hosts`: Base Hosts content, updatable in a controlled way by the drift reconciliation flow
 /// - `profiles/*.hosts`: each profile's content; file name = profile name (sanitized + conflict suffix)
 /// - `manifest.json`: group structure, active state, ordering
 public enum WorkspaceError: Error, Equatable, Sendable {
     /// The workspace has residual content (base.hosts or profile files) but no manifest;
-    /// it must not be overwritten as a first-run import and needs manual intervention.
+    /// it must not be overwritten as a first-run capture and needs manual intervention.
     case residualContentWithoutManifest
-    /// The workspace has not completed first import; domain state cannot be saved and the last-written hash cannot be read or written.
+    /// The workspace has not completed first capture; domain state cannot be saved and the last-written hash cannot be read or written.
     case notInitialized
 }
 
@@ -28,7 +28,7 @@ public struct Workspace: Sendable {
         self.rootDirectory = rootDirectory
     }
 
-    /// Opens the workspace: an empty workspace imports the system hosts as Base Hosts; an initialized
+    /// Opens the workspace: an empty workspace captures the system hosts as Base Hosts; an initialized
     /// workspace restores from existing data and no longer reads the system hosts.
     public func open(systemHosts: () throws -> String) throws -> ActivationModel {
         if FileManager.default.fileExists(atPath: manifestURL.path) {
@@ -37,10 +37,10 @@ public struct Workspace: Sendable {
         guard !hasResidualContent else {
             throw WorkspaceError.residualContentWithoutManifest
         }
-        return try importSystemHosts(systemHosts)
+        return try captureSystemHosts(systemHosts)
     }
 
-    /// hosts.orig alone is treated as an interrupted first import and safe to re-import;
+    /// hosts.orig alone is treated as an interrupted first capture and safe to capture again;
     /// base.hosts or profile files, however, are unreproducible user content.
     private var hasResidualContent: Bool {
         if FileManager.default.fileExists(atPath: baseHostsURL.path) {
@@ -53,9 +53,9 @@ public struct Workspace: Sendable {
         return profileFiles.contains { $0.pathExtension == "hosts" }
     }
 
-    // MARK: - First import
+    // MARK: - First capture
 
-    private func importSystemHosts(_ systemHosts: () throws -> String) throws -> ActivationModel {
+    private func captureSystemHosts(_ systemHosts: () throws -> String) throws -> ActivationModel {
         let content = try systemHosts()
 
         try FileManager.default.createDirectory(at: profilesDirectory, withIntermediateDirectories: true)
@@ -75,7 +75,7 @@ public struct Workspace: Sendable {
         do {
             try Data(content.utf8).write(to: originalBackupURL, options: .withoutOverwriting)
         } catch let error as CocoaError where error.code == .fileWriteFileExists {
-            // Backup already exists (an interrupted first import or concurrent initialization)
+            // Backup already exists (an interrupted first capture or concurrent initialization)
         }
     }
 
@@ -132,14 +132,18 @@ public struct Workspace: Sendable {
             )
             try writeManifest(manifest)
 
-            // Stale profile files are cleaned up only after the manifest is persisted: if any step fails midway,
-            // every file the on-disk manifest references still exists, keeping the workspace loadable.
+            // Stale profile files are cleaned up only after the manifest is persisted — and best-effort:
+            // the manifest write is the commit point, so a cleanup failure must not turn an already
+            // committed save into a thrown one (callers that commit in-memory state only on success
+            // would diverge from disk). An unremoved stale file is unreferenced and retried next save.
             let expectedFileNames = Set(fileNames.values.map { $0.lowercased() })
-            for url in try FileManager.default.contentsOfDirectory(
+            let leftovers = (try? FileManager.default.contentsOfDirectory(
                 at: profilesDirectory,
                 includingPropertiesForKeys: nil
-            ) where url.pathExtension == "hosts" && !expectedFileNames.contains(url.lastPathComponent.lowercased()) {
-                try FileManager.default.removeItem(at: url)
+            )) ?? []
+            for url in leftovers
+            where url.pathExtension == "hosts" && !expectedFileNames.contains(url.lastPathComponent.lowercased()) {
+                try? FileManager.default.removeItem(at: url)
             }
         }
     }
@@ -159,7 +163,7 @@ public struct Workspace: Sendable {
     }
 
     /// The hash the system hosts should currently have. After a successful merge write, the daemon-confirmed value wins;
-    /// before any write it falls back to the read-only pristine snapshot from first import, so even the first write has a verifiable baseline.
+    /// before any write it falls back to the read-only pristine snapshot from first capture, so even the first write has a verifiable baseline.
     public func expectedSystemHostsHash() throws -> String {
         if let lastWrittenHash = try requireManifest().lastWrittenHash {
             return lastWrittenHash
@@ -176,7 +180,7 @@ public struct Workspace: Sendable {
         }
     }
 
-    /// Reading or writing the last-written hash requires the manifest to exist (guaranteed once open has completed first import).
+    /// Reading or writing the last-written hash requires the manifest to exist (guaranteed once open has completed first capture).
     private func requireManifest() throws -> Manifest {
         guard FileManager.default.fileExists(atPath: manifestURL.path) else {
             throw WorkspaceError.notInitialized

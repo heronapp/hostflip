@@ -61,6 +61,9 @@ struct HostflipApp: App {
                 }
         }
         .defaultSize(width: 820, height: 560)
+        .commands {
+            ImportExportCommands(store: store)
+        }
 
         Settings {
             ApplicationSettingsView(

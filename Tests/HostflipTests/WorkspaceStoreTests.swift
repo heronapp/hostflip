@@ -1238,6 +1238,127 @@ final class WorkspaceStoreTests: XCTestCase {
         }
     }
 
+    // MARK: - Import / Export (#40)
+
+    @MainActor
+    func testImportAppendsFilesAsInactiveContentWithoutMerging() throws {
+        let stub = SwitchCoordinatingStub()
+        let store = makeStore(coordinator: stub)
+        let snapshot = ExportSnapshot(
+            standaloneProfiles: [.init(name: "Ad Block", content: "0.0.0.0 ads.example\n")],
+            groups: [.init(name: "Staging", profiles: [
+                .init(name: "API", content: "10.0.0.1 api.example\n")
+            ])]
+        )
+        let urls = [
+            try writeImportFile(named: "team.json", snapshot.encoded()),
+            try writeImportFile(named: "Team DB.hosts", Data("10.0.0.3 db.example\n".utf8)),
+        ]
+
+        let outcome = store.importFiles(at: urls)
+
+        XCTAssertEqual(outcome, .imported)
+        XCTAssertEqual(store.standaloneProfiles.map(\.name), ["Ad Block", "Team DB"])
+        XCTAssertEqual(store.groups.map(\.name), ["Staging"])
+        XCTAssertEqual(store.groups.first?.profiles.map(\.name), ["API"])
+        XCTAssertEqual(store.model?.activeProfileIDs, [])
+
+        // Local-only: no follow-up merge is scheduled and nothing reaches the coordinator.
+        XCTAssertNil(store.followUpMergeTask)
+        XCTAssertTrue(stub.authorizedMerges.isEmpty)
+        XCTAssertTrue(stub.performedSwitches.isEmpty)
+
+        let reloaded = try reloadModel()
+        XCTAssertEqual(reloaded.standaloneProfiles.map(\.name), ["Ad Block", "Team DB"])
+        XCTAssertEqual(reloaded.groups.map(\.name), ["Staging"])
+        XCTAssertEqual(reloaded.activeProfileIDs, [])
+    }
+
+    @MainActor
+    func testImportOfSameNamedProfilesKeepsBothWithoutMerging() throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub())
+        _ = store.createStandaloneProfile()
+        let snapshot = ExportSnapshot(
+            standaloneProfiles: [.init(name: "New Profile", content: "0.0.0.0 ads.example\n")],
+            groups: []
+        )
+
+        let outcome = store.importFiles(at: [
+            try writeImportFile(named: "dup.json", snapshot.encoded())
+        ])
+
+        XCTAssertEqual(outcome, .imported)
+        XCTAssertEqual(store.standaloneProfiles.map(\.name), ["New Profile", "New Profile"])
+        let reloaded = try reloadModel()
+        XCTAssertEqual(reloaded.standaloneProfiles.map(\.name), ["New Profile", "New Profile"])
+        XCTAssertEqual(reloaded.standaloneProfiles.map(\.content).sorted(), [
+            "# Add hosts entries here\n", "0.0.0.0 ads.example\n",
+        ])
+    }
+
+    @MainActor
+    func testImportAppliesNothingWhenAnyFileIsInvalid() throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub())
+        let valid = ExportSnapshot(
+            standaloneProfiles: [.init(name: "Ad Block", content: "0.0.0.0 ads.example\n")],
+            groups: []
+        )
+        let urls = [
+            try writeImportFile(named: "good.json", valid.encoded()),
+            try writeImportFile(named: "bad.json", Data(#"{"nope": 1}"#.utf8)),
+        ]
+
+        let outcome = store.importFiles(at: urls)
+
+        guard case .failed(let message) = outcome else {
+            return XCTFail("导入应整体失败，实际结果：\(outcome)")
+        }
+        XCTAssertTrue(message.contains("bad.json"), message)
+        XCTAssertTrue(store.standaloneProfiles.isEmpty)
+        XCTAssertTrue(try reloadModel().standaloneProfiles.isEmpty)
+    }
+
+    @MainActor
+    func testImportCommitsNothingInMemoryWhenSaveFails() throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub())
+        let url = try writeImportFile(named: "team.json", ExportSnapshot(
+            standaloneProfiles: [.init(name: "Ad Block", content: "0.0.0.0 ads.example\n")],
+            groups: []
+        ).encoded())
+        // Removing hosts.orig makes Workspace.save throw notInitialized after parsing succeeds.
+        try FileManager.default.removeItem(at: rootDirectory.appendingPathComponent("hosts.orig"))
+
+        let outcome = store.importFiles(at: [url])
+
+        guard case .failed = outcome else {
+            return XCTFail("保存失败时导入应失败，实际结果：\(outcome)")
+        }
+        XCTAssertTrue(store.standaloneProfiles.isEmpty)
+        XCTAssertNil(store.followUpMergeTask)
+    }
+
+    @MainActor
+    func testExportedDataRoundTripsAsASnapshotOfCurrentProfiles() throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub())
+        _ = store.createStandaloneProfile()
+
+        let data = try XCTUnwrap(store.exportSnapshotData())
+
+        let read = try ImportReader.read(data: data, fileName: "export.json")
+        XCTAssertEqual(read, .snapshot(ExportSnapshot(
+            standaloneProfiles: [.init(name: "New Profile", content: "# Add hosts entries here\n")],
+            groups: []
+        )))
+    }
+
+    private func writeImportFile(named name: String, _ data: Data) throws -> URL {
+        let directory = rootDirectory.appendingPathComponent("import-files", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent(name)
+        try data.write(to: url)
+        return url
+    }
+
     // MARK: - Helpers
 
     @MainActor
