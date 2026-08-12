@@ -4,6 +4,8 @@ Native macOS hosts switcher. Flip between `/etc/hosts` profiles from your menu b
 
 **Free and open source (MIT).** From the makers of [Heron](https://getheron.app/) — debug your iPhone's web traffic and console, from your Mac.
 
+![hostflip main window: profile groups in the sidebar, the merged system hosts on the right](docs/screenshots/main-window.png)
+
 ## Why hostflip
 
 Editing `/etc/hosts` by hand — or typing your password every time a hosts manager wants to save — gets old fast. hostflip is built around one idea: **switching should be zero-interruption**. You approve the privileged helper once; after that, every flip is a single click in the menu bar.
@@ -14,6 +16,12 @@ Editing `/etc/hosts` by hand — or typing your password every time a hosts mana
 - **Your baseline is protected.** On first run, your current `/etc/hosts` is imported as the read-only *Base Hosts* — always applied first, never lost, and the original file is kept as a permanent backup.
 - **External edits are respected, not clobbered.** If anything else modifies `/etc/hosts`, hostflip detects the drift and walks you through reconciling it in a diff view before it writes again.
 - **Pause everything.** One master switch restores your baseline hosts while remembering every profile's state.
+
+<p align="center">
+  <img src="docs/screenshots/menu-bar.png" width="343" alt="Quick switching from the menu bar: groups as submenus, one active profile per group">
+</p>
+
+![Drift review: external changes to the system hosts shown as a diff before reconciling](docs/screenshots/drift-review.png)
 
 ## Install
 
