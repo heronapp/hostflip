@@ -84,10 +84,11 @@ public enum ImportedContent: Equatable, Sendable {
 }
 
 public enum ImportReader {
-    /// Classifies a file: JSON must be a valid versioned snapshot (never falls through to plain
-    /// text); anything else is plain hosts text named after the file (extension stripped).
+    /// Classifies a file: JSON — including top-level scalars like `42` or `null` — must be a valid
+    /// versioned snapshot (never falls through to plain text); anything else is plain hosts text
+    /// named after the file (extension stripped).
     public static func read(data: Data, fileName: String) throws -> ImportedContent {
-        if (try? JSONSerialization.jsonObject(with: data)) != nil {
+        if (try? JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed)) != nil {
             return .snapshot(try decodeSnapshot(data))
         }
         guard let content = String(data: data, encoding: .utf8) else {

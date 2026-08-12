@@ -132,14 +132,18 @@ public struct Workspace: Sendable {
             )
             try writeManifest(manifest)
 
-            // Stale profile files are cleaned up only after the manifest is persisted: if any step fails midway,
-            // every file the on-disk manifest references still exists, keeping the workspace loadable.
+            // Stale profile files are cleaned up only after the manifest is persisted — and best-effort:
+            // the manifest write is the commit point, so a cleanup failure must not turn an already
+            // committed save into a thrown one (callers that commit in-memory state only on success
+            // would diverge from disk). An unremoved stale file is unreferenced and retried next save.
             let expectedFileNames = Set(fileNames.values.map { $0.lowercased() })
-            for url in try FileManager.default.contentsOfDirectory(
+            let leftovers = (try? FileManager.default.contentsOfDirectory(
                 at: profilesDirectory,
                 includingPropertiesForKeys: nil
-            ) where url.pathExtension == "hosts" && !expectedFileNames.contains(url.lastPathComponent.lowercased()) {
-                try FileManager.default.removeItem(at: url)
+            )) ?? []
+            for url in leftovers
+            where url.pathExtension == "hosts" && !expectedFileNames.contains(url.lastPathComponent.lowercased()) {
+                try? FileManager.default.removeItem(at: url)
             }
         }
     }

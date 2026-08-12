@@ -95,6 +95,17 @@ final class ImportExportTests: XCTestCase {
         }
     }
 
+    func testTopLevelJSONScalarIsRejectedRatherThanTreatedAsPlainText() {
+        for scalar in ["42", "null", #""hello""#] {
+            XCTAssertThrowsError(
+                try ImportReader.read(data: Data(scalar.utf8), fileName: "scalar.json"),
+                scalar
+            ) { error in
+                XCTAssertEqual(error as? ImportError, .malformedSnapshot, scalar)
+            }
+        }
+    }
+
     func testBlankNameInSnapshotIsRejected() {
         let data = Data(
             #"{"version": 1, "standaloneProfiles": [{"name": "  ", "content": "x"}], "groups": []}"#.utf8
