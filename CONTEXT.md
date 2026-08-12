@@ -21,7 +21,7 @@ Where standalone profiles live; profiles can move between groups and the standal
 _Avoid_: ungrouped area, root directory
 
 **Base Hosts**:
-The protected baseline imported from the system hosts on first run; always applied, shown read-only, cannot be deleted, and only updated through the controlled drift-reconciliation flow.
+The protected baseline captured from the system hosts on first run; always applied, shown read-only, cannot be deleted, and only updated through the controlled drift-reconciliation flow.
 _Avoid_: system hosts (reserve that term for the real /etc/hosts file)
 
 **System Hosts**:
@@ -49,9 +49,17 @@ Whether hostflip registers itself as a login item to start automatically at logi
 _Avoid_: auto-start, boot launch
 
 **Workspace**:
-hostflip's persistence directory; holds Base Hosts, the profile files, the manifest, and the original backup from first import (hosts.orig).
+hostflip's persistence directory; holds Base Hosts, the profile files, the manifest, and the original backup from first capture (hosts.orig).
 _Avoid_: data directory, config directory
 
 **Drift**:
 The state where the current system hosts content differs from what hostflip last confirmed; means there are unreconciled external modifications.
 _Avoid_: external change, conflict
+
+**Export**:
+A portable snapshot of every profile and the group structure; excludes Base Hosts and all active state.
+_Avoid_: backup, dump
+
+**Import**:
+Appending external content to the workspace as new, inactive profiles and groups; never changes existing content or the system hosts.
+_Avoid_: restore, load
