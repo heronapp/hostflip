@@ -300,24 +300,9 @@ struct MainWindowView: View {
             ToolbarItem(placement: .automatic) {
                 HelperToolbarControl(store: store, maintenanceStore: maintenanceStore)
             }
-
-            ToolbarItem(placement: .automatic) {
-                Toggle("Enable hostflip", isOn: Binding(
-                    get: { !store.isPaused },
-                    set: { store.setPaused(!$0) }
-                ))
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .disabled(store.model == nil || store.isSwitching || store.hasHostsDrift)
-                .help(store.isPaused ? "Resume hostflip" : "Pause hostflip")
-                .accessibilityLabel("Enable hostflip")
-                .padding(.trailing, 8)
-            }
-            .hidingSharedBackgroundWhenAvailable()
         }
         .background {
-            NativeToolbarFlexibleSpace(trailingItemCount: 1)
+            TitlebarSwitchAccessory(store: store)
         }
         .confirmationDialog(
             "Delete “\(profilePendingDeletion?.name ?? "")”?",
@@ -1512,116 +1497,6 @@ private struct ProfileEditorPane: View {
             await Task.yield()
             nameFieldFocused = true
             nameFocusConsumed()
-        }
-    }
-}
-
-/// SwiftUI has no trailing Toolbar placement on macOS; inserting a native flexible-space into
-/// the existing NSToolbar keeps the last group of items pinned to the right edge of the title bar.
-private struct NativeToolbarFlexibleSpace: NSViewRepresentable {
-    let trailingItemCount: Int
-
-    func makeNSView(context: Context) -> ToolbarFlexibleSpaceInstallerView {
-        let view = ToolbarFlexibleSpaceInstallerView()
-        view.trailingItemCount = trailingItemCount
-        return view
-    }
-
-    func updateNSView(_ nsView: ToolbarFlexibleSpaceInstallerView, context: Context) {
-        nsView.trailingItemCount = trailingItemCount
-        nsView.scheduleInstallation()
-    }
-}
-
-private final class ToolbarFlexibleSpaceInstallerView: NSView {
-    var trailingItemCount = 1
-    private weak var observedToolbar: NSToolbar?
-    private var isInstalling = false
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        guard window != nil else {
-            stopObservingToolbar()
-            return
-        }
-        scheduleInstallation()
-    }
-
-    deinit {
-        NotificationCenter.default.removeObserver(self)
-    }
-
-    func scheduleInstallation() {
-        DispatchQueue.main.async { [weak self] in
-            self?.installSpace()
-        }
-    }
-
-    @objc private func toolbarItemsDidChange(_: Notification) {
-        guard !isInstalling else { return }
-        scheduleInstallation()
-    }
-
-    private func installSpace() {
-        guard let toolbar = window?.toolbar else { return }
-        observe(toolbar)
-
-        let existingIndex = toolbar.items.firstIndex(where: {
-            $0.itemIdentifier == .flexibleSpace
-        })
-        let itemCountWithoutSpace = toolbar.items.count - (existingIndex == nil ? 0 : 1)
-        let insertionIndex = max(itemCountWithoutSpace - trailingItemCount, 0)
-        guard existingIndex != insertionIndex else { return }
-
-        isInstalling = true
-        defer { isInstalling = false }
-        if let existingIndex {
-            toolbar.removeItem(at: existingIndex)
-        }
-        toolbar.insertItem(withItemIdentifier: .flexibleSpace, at: insertionIndex)
-    }
-
-    private func observe(_ toolbar: NSToolbar) {
-        guard observedToolbar !== toolbar else { return }
-        stopObservingToolbar()
-        observedToolbar = toolbar
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(toolbarItemsDidChange(_:)),
-            name: NSToolbar.willAddItemNotification,
-            object: toolbar
-        )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(toolbarItemsDidChange(_:)),
-            name: NSToolbar.didRemoveItemNotification,
-            object: toolbar
-        )
-    }
-
-    private func stopObservingToolbar() {
-        guard let observedToolbar else { return }
-        NotificationCenter.default.removeObserver(
-            self,
-            name: NSToolbar.willAddItemNotification,
-            object: observedToolbar
-        )
-        NotificationCenter.default.removeObserver(
-            self,
-            name: NSToolbar.didRemoveItemNotification,
-            object: observedToolbar
-        )
-        self.observedToolbar = nil
-    }
-}
-
-private extension ToolbarContent {
-    @ToolbarContentBuilder
-    func hidingSharedBackgroundWhenAvailable() -> some ToolbarContent {
-        if #available(macOS 26.0, *) {
-            sharedBackgroundVisibility(.hidden)
-        } else {
-            self
         }
     }
 }
