@@ -3,6 +3,8 @@ import Sparkle
 import SwiftUI
 
 struct ApplicationSettingsView: View {
+    let store: WorkspaceStore
+    let maintenanceStore: MaintenanceStore
     let dockIconStore: DockIconVisibilityStore
     let launchAtLoginStore: LaunchAtLoginStore
     let updater: SPUUpdater
@@ -36,17 +38,28 @@ struct ApplicationSettingsView: View {
                     .foregroundStyle(.secondary)
             }
             .padding(20)
+            .frame(width: 460, height: 190)
             .tabItem {
                 Label("General", systemImage: "gearshape")
             }
 
+            // Second home of helper management alongside the toolbar popover (#41):
+            // Settings is where users expect to find privileged-component removal,
+            // e.g. before uninstalling. The extra height leaves room for feedback.
+            HelperMaintenanceSection(store: store, maintenanceStore: maintenanceStore)
+                .padding(20)
+                .frame(width: 460, height: 230, alignment: .topLeading)
+                .tabItem {
+                    Label("Helper", systemImage: "gearshape.2")
+                }
+
             UpdatesSettingsView(updater: updater)
                 .padding(20)
+                .frame(width: 460, height: 190)
                 .tabItem {
                     Label("Updates", systemImage: "arrow.triangle.2.circlepath")
                 }
         }
-        .frame(width: 460, height: 190)
     }
 }
 

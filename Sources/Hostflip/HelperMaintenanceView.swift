@@ -67,7 +67,6 @@ struct HelperMaintenanceView: View {
     let maintenanceStore: MaintenanceStore
     let onDismiss: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
-    @State private var isConfirmingRemoval = false
 
     init(
         store: WorkspaceStore,
@@ -80,11 +79,43 @@ struct HelperMaintenanceView: View {
     }
 
     var body: some View {
-        let helperPresentation = HelperStatusPresentation(maintenanceStore.helperStatus)
         VStack(alignment: .leading, spacing: 14) {
             Text("Maintenance")
                 .font(.headline)
 
+            HelperMaintenanceSection(
+                store: store,
+                maintenanceStore: maintenanceStore,
+                beforeOpeningSystemSettings: { close() }
+            )
+        }
+        .padding(16)
+        .frame(width: 380)
+    }
+
+    private func close() {
+        if let onDismiss {
+            onDismiss()
+        } else {
+            dismiss()
+        }
+    }
+}
+
+/// Shared body of the helper management UI: status, approval shortcut, removal with
+/// confirmation, and operation feedback. Hosted by the toolbar popover and by
+/// Settings > Helper (#41); both hand it the same MaintenanceStore instance, so the
+/// two entry points can never disagree.
+struct HelperMaintenanceSection: View {
+    let store: WorkspaceStore
+    let maintenanceStore: MaintenanceStore
+    /// Runs before jumping to System Settings; the popover closes itself here.
+    var beforeOpeningSystemSettings: () -> Void = {}
+    @State private var isConfirmingRemoval = false
+
+    var body: some View {
+        let helperPresentation = HelperStatusPresentation(maintenanceStore.helperStatus)
+        VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 8) {
                 Label("Background Helper", systemImage: "gearshape.2")
                     .font(.subheadline.weight(.semibold))
@@ -98,7 +129,7 @@ struct HelperMaintenanceView: View {
                     HStack {
                         if helperPresentation.canOpenApprovalSettings {
                             Button("Open System Settings…") {
-                                close()
+                                beforeOpeningSystemSettings()
                                 store.openApprovalSettings()
                             }
                         }
@@ -138,8 +169,6 @@ struct HelperMaintenanceView: View {
                 .foregroundStyle(feedbackPresentation.isFailure ? .red : .green)
             }
         }
-        .padding(16)
-        .frame(width: 380)
         .task { await maintenanceStore.refreshHelperStatus() }
         .confirmationDialog(
             "Deactivate and Remove Helper?",
@@ -159,13 +188,5 @@ struct HelperMaintenanceView: View {
             return "Retry Remove Helper…"
         }
         return "Deactivate and Remove Helper…"
-    }
-
-    private func close() {
-        if let onDismiss {
-            onDismiss()
-        } else {
-            dismiss()
-        }
     }
 }
