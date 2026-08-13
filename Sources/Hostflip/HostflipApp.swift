@@ -82,44 +82,24 @@ private struct MenuBarLabel: View {
     let applicationDelegate: ApplicationLifecycleDelegate
 
     var body: some View {
-        Group {
-            if store.switchFeedback == .merged {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-            } else {
-                HostflipGlyph()
-                    .frame(width: 18, height: 18)
-            }
-        }
-            .overlay(alignment: .topTrailing) {
-                if store.hasHostsDrift {
-                    Circle()
-                        .fill(.red)
-                        .frame(width: 6, height: 6)
-                        .offset(x: 2, y: -1)
-                }
-            }
-            .accessibilityLabel(
-                store.hasHostsDrift ? "Hostflip, hosts drift detected" : "Hostflip"
-            )
+        HostflipGlyph(
+            alpha: store.isPaused ? 0.45 : 1,
+            showsAlertDot: store.hasHostsDrift
+        )
+            .frame(width: 18, height: 18)
+            .accessibilityLabel(accessibilityLabelText)
             .background {
                 MainWindowActionInstaller(
                     applicationDelegate: applicationDelegate
                 )
             }
-            .task(id: store.switchFeedback) {
-                guard store.switchFeedback == .merged else { return }
-                MenuBarToast.show(message: store.switchFeedback?.message ?? "")
-                do {
-                    try await Task.sleep(for: .milliseconds(900))
-                } catch {
-                    MenuBarToast.hide()
-                    return
-                }
-                MenuBarToast.hide()
-                guard store.switchFeedback == .merged else { return }
-                store.clearSwitchFeedback()
-            }
+    }
+
+    private var accessibilityLabelText: String {
+        var label = "Hostflip"
+        if store.isPaused { label += ", paused" }
+        if store.hasHostsDrift { label += ", hosts drift detected" }
+        return label
     }
 }
 
@@ -137,29 +117,39 @@ private struct MenuBarContent: View {
         ))
         .disabled(store.model == nil || store.isSwitching || store.hasHostsDrift)
 
+        if store.hasHostsDrift {
+            Button("Hosts file changed externally — Review…") {
+                applicationDelegate.requestMainWindow()
+            }
+        }
+
         if hasProfiles {
             Divider()
 
-            ForEach(groupsWithProfiles) { group in
-                Menu(group.name) {
-                    ForEach(group.profiles) { profile in
-                        profileToggle(profile)
-                    }
-                }
-                .disabled(store.isPaused || store.isSwitching || store.hasHostsDrift)
+            ForEach(store.standaloneProfiles) { profile in
+                profileToggle(profile)
             }
 
             if !groupsWithProfiles.isEmpty, !store.standaloneProfiles.isEmpty {
                 Divider()
             }
 
-            ForEach(store.standaloneProfiles) { profile in
-                profileToggle(profile)
+            ForEach(groupsWithProfiles) { group in
+                Menu {
+                    ForEach(group.profiles) { profile in
+                        profileToggle(profile)
+                    }
+                } label: {
+                    Text(menuItemTitle(group.name))
+                }
+                .badge(activeProfileName(in: group).map(Text.init))
+                .disabled(store.isPaused || store.isSwitching || store.hasHostsDrift)
             }
         } else {
             Divider()
-            Text("No Profiles")
-                .foregroundStyle(.secondary)
+            Button("No profiles yet — create one…") {
+                applicationDelegate.requestMainWindow()
+            }
         }
 
         Divider()
@@ -183,13 +173,29 @@ private struct MenuBarContent: View {
     }
 
     private func profileToggle(_ profile: Profile) -> some View {
-        Toggle(profile.name, isOn: Binding(
+        Toggle(isOn: Binding(
             get: { store.isActive(profile.id) },
             set: { active in
                 startSwitch { store.setProfileActive(profile.id, active) }
             }
-        ))
+        )) {
+            Text(menuItemTitle(profile.name))
+        }
         .disabled(store.isPaused || store.isSwitching || store.hasHostsDrift)
+    }
+
+    /// Modern macOS no longer dims disabled menu rows with custom labels, so
+    /// paused rows gray themselves out through the attributed title instead.
+    private func menuItemTitle(_ name: String) -> AttributedString {
+        var title = AttributedString(name)
+        if store.isPaused {
+            title.foregroundColor = .secondary
+        }
+        return title
+    }
+
+    private func activeProfileName(in group: HostflipCore.Group) -> String? {
+        group.profiles.first { store.isActive($0.id) }?.name
     }
 
     private var groupsWithProfiles: [HostflipCore.Group] {
@@ -235,58 +241,6 @@ private struct MenuBarContent: View {
         if feedback == .needsApproval, response == .alertFirstButtonReturn {
             store.openApprovalSettings()
         }
-    }
-}
-
-@MainActor
-private enum MenuBarToast {
-    private static var panel: NSPanel?
-
-    static func show(message: String) {
-        hide()
-
-        let content = HStack(spacing: 6) {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-            Text(message)
-        }
-        .font(.callout)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-
-        let hostingView = NSHostingView(rootView: content)
-        let contentSize = hostingView.fittingSize
-        let panel = NSPanel(
-            contentRect: NSRect(origin: .zero, size: contentSize),
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-        panel.contentView = hostingView
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = true
-        panel.hidesOnDeactivate = false
-        panel.ignoresMouseEvents = true
-        panel.level = .statusBar
-        panel.collectionBehavior = [.canJoinAllSpaces, .transient, .ignoresCycle]
-
-        let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
-        if let visibleFrame = screen?.visibleFrame {
-            panel.setFrameOrigin(NSPoint(
-                x: visibleFrame.maxX - contentSize.width - 12,
-                y: visibleFrame.maxY - contentSize.height - 8
-            ))
-        }
-
-        panel.orderFrontRegardless()
-        self.panel = panel
-    }
-
-    static func hide() {
-        panel?.orderOut(nil)
-        panel = nil
     }
 }
 

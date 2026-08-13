@@ -1048,7 +1048,7 @@ private struct MainWindowStateBanner: View {
                             "Paused — selections are saved but not applied to the system hosts file.",
                             systemImage: "pause.circle.fill"
                         )
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.orange)
                         .lineLimit(2)
                         Spacer(minLength: 12)
                     case .hostsDrift:
