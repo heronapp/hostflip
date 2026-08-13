@@ -522,8 +522,9 @@ struct MainWindowView: View {
                 .help("Profile Actions")
                 .accessibilityLabel("Actions for \(profile.name)")
                 if hoveredSidebarActions == item {
-                    RoundedRectangle(cornerRadius: 5)
+                    Circle()
                         .fill(Color.primary.opacity(0.10))
+                        .frame(width: 22, height: 22)
                         .allowsHitTesting(false)
                 }
                 Image(systemName: "ellipsis")
@@ -631,8 +632,9 @@ struct MainWindowView: View {
                 .help("Group Actions")
                 .accessibilityLabel("Actions for \(group.name)")
                 if hoveredSidebarActions == item {
-                    RoundedRectangle(cornerRadius: 5)
+                    Circle()
                         .fill(Color.primary.opacity(0.10))
+                        .frame(width: 22, height: 22)
                         .allowsHitTesting(false)
                 }
                 Image(systemName: "ellipsis")
