@@ -300,24 +300,9 @@ struct MainWindowView: View {
             ToolbarItem(placement: .automatic) {
                 HelperToolbarControl(store: store, maintenanceStore: maintenanceStore)
             }
-
-            ToolbarItem(placement: .automatic) {
-                Toggle("Enable hostflip", isOn: Binding(
-                    get: { !store.isPaused },
-                    set: { store.setPaused(!$0) }
-                ))
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .disabled(store.model == nil || store.isSwitching || store.hasHostsDrift)
-                .help(store.isPaused ? "Resume hostflip" : "Pause hostflip")
-                .accessibilityLabel("Enable hostflip")
-                .padding(.trailing, 8)
-            }
-            .hidingSharedBackgroundWhenAvailable()
         }
         .background {
-            NativeToolbarFlexibleSpace(trailingItemCount: 1)
+            TitlebarSwitchAccessory(store: store)
         }
         .confirmationDialog(
             "Delete “\(profilePendingDeletion?.name ?? "")”?",
@@ -916,10 +901,14 @@ struct MainWindowView: View {
                 description: Text(loadError)
             )
         } else {
+            let editedProfile: Profile? = {
+                if case .profile(let profileID) = selection { return store.profile(profileID) }
+                return nil
+            }()
             VStack(spacing: 0) {
                 MainWindowStateBanner(store: store, presentation: presentation)
-                if case .profile(let profileID) = selection, let profile = store.profile(profileID) {
-                    ProfileEditorPane(
+                if let profile = editedProfile {
+                    ProfileEditorHeader(
                         store: store,
                         profile: profile,
                         presentation: presentation,
@@ -931,12 +920,35 @@ struct MainWindowView: View {
                         },
                         requestDeletion: { profilePendingDeletion = profile }
                     )
-                    .id(profile.id) // Rebuild the pane when the profile changes so the name draft never leaks across profiles
+                    .id(profile.id) // Rebuild the header when the profile changes so the name draft never leaks across profiles
                 } else {
-                    BaseHostsViewerPane(store: store)
+                    BaseHostsHeader()
                 }
+                Divider()
+                sharedEditor(for: editedProfile)
             }
         }
+    }
+
+    /// One persistent editor below the switching headers: a document switch (including the first
+    /// profile created from Base Hosts) swaps content in place instead of re-creating the
+    /// NSScrollView, whose zero-sized first frame could flash before SwiftUI sizes it.
+    private func sharedEditor(for profile: Profile?) -> some View {
+        let profileID = profile?.id
+        return HostsEditor(
+            text: Binding(
+                get: {
+                    if let profileID { return store.profile(profileID)?.content ?? "" }
+                    return store.baseHostsContent
+                },
+                set: { newValue in
+                    guard let profileID else { return }
+                    store.updateProfileContent(profileID, content: newValue)
+                }
+            ),
+            isEditable: profileID != nil,
+            documentID: profileID.map { AnyHashable($0) } ?? AnyHashable("base-hosts")
+        )
     }
 }
 
@@ -1359,43 +1371,34 @@ private struct SystemHostsViewerPane: View {
     }
 }
 
-/// Read-only Base Hosts pane: the content can only be updated, in a controlled way, through the drift reconciliation flow.
-private struct BaseHostsViewerPane: View {
-    let store: WorkspaceStore
-
+/// Read-only Base Hosts header: the content below can only be updated, in a controlled way, through the drift reconciliation flow.
+private struct BaseHostsHeader: View {
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Base Hosts")
-                        .font(.headline)
-                    Text("Protected · Read Only")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Label("Always Active", systemImage: "lock.fill")
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Base Hosts")
+                    .font(.headline)
+                Text("Protected · Read Only")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(.primary.opacity(0.06), in: Capsule())
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            Divider()
-            HostsEditor(
-                text: Binding(get: { store.baseHostsContent }, set: { _ in }),
-                isEditable: false
-            )
+            Spacer()
+            Label("Always Active", systemImage: "lock.fill")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(.primary.opacity(0.06), in: Capsule())
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
     }
 }
 
-/// Profile editor pane: the header holds the renamable profile name, an ownership caption, and
-/// the "make active" pill; the body is the highlighting editor. Renames apply on commit or focus
-/// loss, never rewriting the profile file per keystroke.
-private struct ProfileEditorPane: View {
+/// Profile editor header: holds the renamable profile name, an ownership caption, and the
+/// "make active" pill; the highlighting editor below it is shared across documents. Renames
+/// apply on commit or focus loss, never rewriting the profile file per keystroke.
+private struct ProfileEditorHeader: View {
     let store: WorkspaceStore
     let profile: Profile
     let presentation: MainWindowPresentation
@@ -1423,49 +1426,42 @@ private struct ProfileEditorPane: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    TextField("Profile Name", text: $draftName)
-                        .textFieldStyle(.plain)
-                        .font(.headline)
-                        .focused($nameFieldFocused)
-                        .onSubmit(commitRename)
-                        .onChange(of: nameFieldFocused) {
-                            if !nameFieldFocused { commitRename() }
-                        }
-                        .onExitCommand {
-                            draftName = profile.name
-                            nameFieldFocused = false
-                        }
-                    Text(locationDescription)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                SaveErrorText(store: store)
-                if store.isSwitching {
-                    ProgressView()
-                        .controlSize(.small)
-                }
-                activePill
-                Button {
-                    requestDeletion()
-                } label: {
-                    Image(systemName: "trash")
-                }
-                .buttonStyle(.borderless)
-                .disabled(store.isSwitching)
-                .help("Delete Profile")
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                TextField("Profile Name", text: $draftName)
+                    .textFieldStyle(.plain)
+                    .font(.headline)
+                    .focused($nameFieldFocused)
+                    .onSubmit(commitRename)
+                    .onChange(of: nameFieldFocused) {
+                        if !nameFieldFocused { commitRename() }
+                    }
+                    .onExitCommand {
+                        draftName = profile.name
+                        nameFieldFocused = false
+                    }
+                Text(locationDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            Divider()
-            HostsEditor(text: Binding(
-                get: { store.profile(profile.id)?.content ?? "" },
-                set: { store.updateProfileContent(profile.id, content: $0) }
-            ))
+            Spacer()
+            SaveErrorText(store: store)
+            if store.isSwitching {
+                ProgressView()
+                    .controlSize(.small)
+            }
+            activePill
+            Button {
+                requestDeletion()
+            } label: {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.borderless)
+            .disabled(store.isSwitching)
+            .help("Delete Profile")
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
         .onAppear { focusNameIfRequested() }
         .onChange(of: focusName) { focusNameIfRequested() }
     }
@@ -1512,116 +1508,6 @@ private struct ProfileEditorPane: View {
             await Task.yield()
             nameFieldFocused = true
             nameFocusConsumed()
-        }
-    }
-}
-
-/// SwiftUI has no trailing Toolbar placement on macOS; inserting a native flexible-space into
-/// the existing NSToolbar keeps the last group of items pinned to the right edge of the title bar.
-private struct NativeToolbarFlexibleSpace: NSViewRepresentable {
-    let trailingItemCount: Int
-
-    func makeNSView(context: Context) -> ToolbarFlexibleSpaceInstallerView {
-        let view = ToolbarFlexibleSpaceInstallerView()
-        view.trailingItemCount = trailingItemCount
-        return view
-    }
-
-    func updateNSView(_ nsView: ToolbarFlexibleSpaceInstallerView, context: Context) {
-        nsView.trailingItemCount = trailingItemCount
-        nsView.scheduleInstallation()
-    }
-}
-
-private final class ToolbarFlexibleSpaceInstallerView: NSView {
-    var trailingItemCount = 1
-    private weak var observedToolbar: NSToolbar?
-    private var isInstalling = false
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        guard window != nil else {
-            stopObservingToolbar()
-            return
-        }
-        scheduleInstallation()
-    }
-
-    deinit {
-        NotificationCenter.default.removeObserver(self)
-    }
-
-    func scheduleInstallation() {
-        DispatchQueue.main.async { [weak self] in
-            self?.installSpace()
-        }
-    }
-
-    @objc private func toolbarItemsDidChange(_: Notification) {
-        guard !isInstalling else { return }
-        scheduleInstallation()
-    }
-
-    private func installSpace() {
-        guard let toolbar = window?.toolbar else { return }
-        observe(toolbar)
-
-        let existingIndex = toolbar.items.firstIndex(where: {
-            $0.itemIdentifier == .flexibleSpace
-        })
-        let itemCountWithoutSpace = toolbar.items.count - (existingIndex == nil ? 0 : 1)
-        let insertionIndex = max(itemCountWithoutSpace - trailingItemCount, 0)
-        guard existingIndex != insertionIndex else { return }
-
-        isInstalling = true
-        defer { isInstalling = false }
-        if let existingIndex {
-            toolbar.removeItem(at: existingIndex)
-        }
-        toolbar.insertItem(withItemIdentifier: .flexibleSpace, at: insertionIndex)
-    }
-
-    private func observe(_ toolbar: NSToolbar) {
-        guard observedToolbar !== toolbar else { return }
-        stopObservingToolbar()
-        observedToolbar = toolbar
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(toolbarItemsDidChange(_:)),
-            name: NSToolbar.willAddItemNotification,
-            object: toolbar
-        )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(toolbarItemsDidChange(_:)),
-            name: NSToolbar.didRemoveItemNotification,
-            object: toolbar
-        )
-    }
-
-    private func stopObservingToolbar() {
-        guard let observedToolbar else { return }
-        NotificationCenter.default.removeObserver(
-            self,
-            name: NSToolbar.willAddItemNotification,
-            object: observedToolbar
-        )
-        NotificationCenter.default.removeObserver(
-            self,
-            name: NSToolbar.didRemoveItemNotification,
-            object: observedToolbar
-        )
-        self.observedToolbar = nil
-    }
-}
-
-private extension ToolbarContent {
-    @ToolbarContentBuilder
-    func hidingSharedBackgroundWhenAvailable() -> some ToolbarContent {
-        if #available(macOS 26.0, *) {
-            sharedBackgroundVisibility(.hidden)
-        } else {
-            self
         }
     }
 }

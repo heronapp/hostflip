@@ -45,6 +45,23 @@ The first time you actually switch something, macOS asks you to approve the help
 
 Technical deep-dives live in [`docs/`](docs/): signed-build verification, helper re-registration behavior, DNS flush measurements, and the release pipeline, all with reproducible steps.
 
+## FAQ
+
+**I switched profiles, but my browser still resolves the old address.**
+
+The system side is already complete — every write ends with a full DNS flush (`dscacheutil -flushcache` plus a `HUP` to `mDNSResponder`). What ignores it is the browser itself, in two layers: browsers keep a private DNS cache (roughly a minute), and — the bigger one — they keep established HTTP/2 and HTTP/3 connections alive for minutes. A reload rides an existing connection to the old address without resolving anything, which is why the behavior looks random and why restarting the browser "fixes" it. No hosts switcher can reach inside another process to clear these.
+
+To pick up a switch without restarting the browser:
+
+- **Chrome / Edge**: open `chrome://net-internals/#dns` (`edge://net-internals/#dns`) and click **Clear host cache**; then — the step that actually matters — `chrome://net-internals/#sockets` → **Flush socket pools**. A fresh incognito window also works: it gets its own DNS cache and connection pool (a plain new window shares them).
+- **Firefox**: `about:networking#dns` → Clear DNS Cache. There is no UI for the connection pool, so a private window is the practical route.
+- **Safari**: exposes neither; restart it or wait for idle connections to time out.
+- DevTools' "Disable cache" does not help — it only affects the HTTP cache, not DNS or connection reuse.
+
+To confirm the switch itself took effect, ask the system resolver directly: `dscacheutil -q host -a name your.host.name`. If that returns the new address, hostflip did its job and what you're seeing is browser-side.
+
+One adjacent trap: with DNS-over-HTTPS enabled (Chrome's "Secure DNS", Firefox's TRR), some configurations bypass `/etc/hosts` entirely. That shows up as hosts entries *never* working — different from needing a browser restart.
+
 ## Updating
 
 - Homebrew: `brew upgrade --cask hostflip`
