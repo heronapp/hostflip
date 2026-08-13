@@ -182,6 +182,9 @@ struct MainWindowView: View {
     @State private var groupPendingRename: HostflipCore.Group.ID?
     @State private var groupNameDraft = ""
     @State private var groupPendingDeletion: HostflipCore.Group?
+    /// Sidebar view state only, never part of the workspace model: groups the user
+    /// folded up. Absence means expanded, so new groups start open.
+    @State private var collapsedGroups: Set<HostflipCore.Group.ID> = []
     @State private var draggedSidebarItem: SidebarDragItem?
     @State private var sidebarDropFeedback: SidebarDropPlan.Feedback?
     @State private var hoveredSidebarItem: SidebarDragItem?
@@ -371,13 +374,18 @@ struct MainWindowView: View {
                     }
             }
             ForEach(Array(store.groups.enumerated()), id: \.element.id) { groupIndex, group in
+                // Collapse is drawn by hand (conditional rows + own chevron): the native
+                // Section(isExpanded:) chevron fights the custom header's trailing
+                // controls and reflows them when collapsed.
                 Section {
-                    ForEach(group.profiles) { profile in
-                        sidebarProfileRow(
-                            profile,
-                            groupID: group.id,
-                            index: group.profiles.firstIndex(where: { $0.id == profile.id }) ?? 0
-                        )
+                    if !collapsedGroups.contains(group.id) {
+                        ForEach(group.profiles) { profile in
+                            sidebarProfileRow(
+                                profile,
+                                groupID: group.id,
+                                index: group.profiles.firstIndex(where: { $0.id == profile.id }) ?? 0
+                            )
+                        }
                     }
                     if sidebarDropFeedback == .group(group.id, .after) {
                         insertionDropIndicator
@@ -396,6 +404,16 @@ struct MainWindowView: View {
         }
         .navigationSplitViewColumnWidth(min: 200, ideal: 236)
         .safeAreaInset(edge: .bottom, spacing: 0) { newItemBar }
+    }
+
+    private func toggleGroupCollapsed(_ id: HostflipCore.Group.ID) {
+        withAnimation {
+            if collapsedGroups.contains(id) {
+                collapsedGroups.remove(id)
+            } else {
+                collapsedGroups.insert(id)
+            }
+        }
     }
 
     private var sidebarEmptyState: some View {
@@ -588,6 +606,9 @@ struct MainWindowView: View {
                     item: item,
                     name: group.name
                 ))
+                // Scoped to the name area so it can never race the ⋯ menu or the
+                // chevron button for a click.
+                .onTapGesture { toggleGroupCollapsed(group.id) }
             }
             ZStack {
                 Menu {
@@ -616,6 +637,23 @@ struct MainWindowView: View {
             .frame(width: 28, height: 28)
             .contentShape(Rectangle())
             .onHover { updateSidebarActionHover(item, hovering: $0) }
+            // Always-visible chevron in a fixed trailing slot (group names vary in
+            // width, so a name-adjacent chevron would wander); the hover-only ⋯ sits
+            // just inside it. A tap gesture, not a Button: a Button's action runs in
+            // its own transaction, which drops withAnimation on the list's row diff.
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .rotationEffect(.degrees(collapsedGroups.contains(group.id) ? 0 : 90))
+                .frame(width: 16, height: 28)
+                .contentShape(Rectangle())
+                .onTapGesture { toggleGroupCollapsed(group.id) }
+                .help(collapsedGroups.contains(group.id) ? "Expand Group" : "Collapse Group")
+                .accessibilityLabel(
+                    collapsedGroups.contains(group.id)
+                        ? "Expand \(group.name)" : "Collapse \(group.name)"
+                )
+                .accessibilityAddTraits(.isButton)
         }
         .padding(.horizontal, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
