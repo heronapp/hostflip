@@ -449,6 +449,9 @@ struct MainWindowView: View {
             .padding(.top, 8)
             .padding(.bottom, 10)
         }
+        // The list scrolls under this inset; without a backing material the rows
+        // show through and collide with the New button.
+        .background(.bar)
     }
 
     private func sidebarProfileRow(
