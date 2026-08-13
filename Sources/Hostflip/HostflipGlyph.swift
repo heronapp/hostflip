@@ -4,19 +4,22 @@ import SwiftUI
 /// The hostflip menu bar icon: two host posts and a flippable crossbar.
 /// Renders as a monochrome template by default; a tint opts out of template
 /// mode because the status bar strips per-view foreground colors otherwise.
+/// Dimming is baked into the image alpha for the same reason: the status bar
+/// also flattens view-level `.opacity`.
 struct HostflipGlyph: View {
     var tint: NSColor?
+    var alpha: CGFloat = 1
 
     var body: some View {
-        Image(nsImage: Self.makeImage(tint: tint))
+        Image(nsImage: Self.makeImage(tint: tint, alpha: alpha))
             .renderingMode(tint == nil ? .template : .original)
             .resizable()
             .aspectRatio(1, contentMode: .fit)
             .accessibilityHidden(true)
     }
 
-    static func makeImage(tint: NSColor? = nil) -> NSImage {
-        let color = tint ?? .black
+    static func makeImage(tint: NSColor? = nil, alpha: CGFloat = 1) -> NSImage {
+        let color = (tint ?? .black).withAlphaComponent(alpha)
         let image = NSImage(
             size: NSSize(width: 18, height: 18),
             flipped: true

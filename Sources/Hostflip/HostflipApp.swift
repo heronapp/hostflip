@@ -82,9 +82,8 @@ private struct MenuBarLabel: View {
     let applicationDelegate: ApplicationLifecycleDelegate
 
     var body: some View {
-        HostflipGlyph(tint: iconTint)
+        HostflipGlyph(tint: iconTint, alpha: store.isPaused ? 0.45 : 1)
             .frame(width: 18, height: 18)
-            .opacity(store.isPaused ? 0.45 : 1)
             .overlay(alignment: .topTrailing) {
                 if store.hasHostsDrift {
                     Circle()

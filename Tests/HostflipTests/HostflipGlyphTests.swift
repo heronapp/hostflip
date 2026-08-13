@@ -29,4 +29,10 @@ final class HostflipGlyphTests: XCTestCase {
         XCTAssertEqual(image.size, NSSize(width: 18, height: 18))
         XCTAssertFalse(image.isTemplate)
     }
+
+    func testDimmedImageStaysTemplate() {
+        let image = HostflipGlyph.makeImage(alpha: 0.45)
+
+        XCTAssertTrue(image.isTemplate)
+    }
 }
