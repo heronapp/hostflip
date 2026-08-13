@@ -826,6 +826,7 @@ struct MainWindowView: View {
             systemImage = isActive ? "largecircle.fill.circle" : "circle"
         }
         return Button {
+            guard !presentation.activationControlsDisabled else { return }
             store.setProfileActive(profile.id, !isActive)
         } label: {
             Image(systemName: systemImage)
@@ -837,7 +838,7 @@ struct MainWindowView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(presentation.activationControlsDisabled)
+        .disabled(presentation.activationControlsDimmed)
         .opacity(presentation.profilesAreEffective ? 1 : 0.55)
         .accessibilityLabel(isActive ? "Deactivate \(profile.name)" : "Activate \(profile.name)")
         .accessibilityValue(isActive ? "Active" : "Inactive")
@@ -1473,6 +1474,7 @@ private struct ProfileEditorPane: View {
         let isSelectedActive = store.isActive(profile.id)
         let isEffective = isSelectedActive && presentation.profilesAreEffective
         return Button {
+            guard !presentation.activationControlsDisabled else { return }
             store.setProfileActive(profile.id, !isSelectedActive)
         } label: {
             Label(
@@ -1488,7 +1490,7 @@ private struct ProfileEditorPane: View {
                 )
         }
         .buttonStyle(.plain)
-        .disabled(presentation.activationControlsDisabled)
+        .disabled(presentation.activationControlsDimmed)
     }
 
     private var locationDescription: String {

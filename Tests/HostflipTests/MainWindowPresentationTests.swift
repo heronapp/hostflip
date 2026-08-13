@@ -17,7 +17,23 @@ final class MainWindowPresentationTests: XCTestCase {
         XCTAssertEqual(presentation.banner, .paused)
         XCTAssertFalse(presentation.profilesAreEffective)
         XCTAssertTrue(presentation.activationControlsDisabled)
+        XCTAssertTrue(presentation.activationControlsDimmed)
         XCTAssertFalse(presentation.showsEmptyState)
+    }
+
+    func testInFlightSwitchBlocksClicksWithoutDimmingControls() {
+        let presentation = MainWindowPresentation(
+            isPaused: false,
+            hasHostsDrift: false,
+            helperStatus: .enabled,
+            switchFeedback: nil,
+            backgroundSyncError: nil,
+            profileCount: 2,
+            isSwitching: true
+        )
+
+        XCTAssertTrue(presentation.activationControlsDisabled)
+        XCTAssertFalse(presentation.activationControlsDimmed, "瞬态切换不应让整列控件闪烁置灰")
     }
 
     func testHostsDriftBlocksActivationAndTakesBannerPriority() {
@@ -34,6 +50,7 @@ final class MainWindowPresentationTests: XCTestCase {
         XCTAssertEqual(presentation.banner, .hostsDrift)
         XCTAssertTrue(presentation.profilesAreEffective)
         XCTAssertTrue(presentation.activationControlsDisabled)
+        XCTAssertTrue(presentation.activationControlsDimmed)
     }
 
     func testApprovalRequiredIsActionableWithoutDisablingLocalEditing() {
