@@ -55,6 +55,12 @@ struct MainWindowView: View {
                     guard hovering != isHovering else { return }
                     isHovering = hovering
                     if hovering {
+                        // Same stale-drag cleanup as the row-level hover handlers:
+                        // hover events cannot arrive while a drag session is tracking.
+                        if draggedItem != nil {
+                            draggedItem = nil
+                            feedback = nil
+                        }
                         hoveredItem = item
                         NSCursor.openHand.push()
                     } else {
@@ -182,12 +188,20 @@ struct MainWindowView: View {
     @State private var groupPendingRename: HostflipCore.Group.ID?
     @State private var groupNameDraft = ""
     @State private var groupPendingDeletion: HostflipCore.Group?
+    /// Sidebar view state only, never part of the workspace model: groups the user
+    /// folded up. Absence means expanded, so new groups start open.
+    @State private var collapsedGroups: Set<HostflipCore.Group.ID> = []
     @State private var draggedSidebarItem: SidebarDragItem?
     @State private var sidebarDropFeedback: SidebarDropPlan.Feedback?
     @State private var hoveredSidebarItem: SidebarDragItem?
     @State private var hoveredSidebarActions: SidebarDragItem?
     @FocusState private var focusedGroupName: HostflipCore.Group.ID?
     @FocusState private var focusedSidebarActions: SidebarDragItem?
+    /// The row name's custom tap gesture (it coexists with the drag source) selects
+    /// without giving the list first-responder status the way a native row click
+    /// does; tracking focus lets that gesture hand it back, so the selection shows
+    /// emphasized and the Return shortcut is live right after a click.
+    @FocusState private var sidebarHasFocus: Bool
 
     /// Live workspace queries: each proposal re-asks the store (items can
     /// vanish mid-drag), reusing its existing lookups instead of copying IDs.
@@ -247,7 +261,15 @@ struct MainWindowView: View {
         }
         .navigationTitle("hostflip")
         .modifier(HideWindowToolbarTitle())
-        .onAppear { store.loadIfNeeded() }
+        .onAppear {
+            store.loadIfNeeded()
+            // The window opens with the sidebar holding key focus, so the default
+            // selection shows emphasized and Return works before any click.
+            // defaultFocus does not reach a List inside NavigationSplitView on
+            // macOS, and setting FocusState during view installation is dropped —
+            // defer it one runloop turn.
+            DispatchQueue.main.async { sidebarHasFocus = true }
+        }
         .task(id: store.switchFeedback) {
             await maintenanceStore.refreshHelperStatus()
             guard store.switchFeedback == .merged else { return }
@@ -371,13 +393,18 @@ struct MainWindowView: View {
                     }
             }
             ForEach(Array(store.groups.enumerated()), id: \.element.id) { groupIndex, group in
+                // Collapse is drawn by hand (conditional rows + own chevron): the native
+                // Section(isExpanded:) chevron fights the custom header's trailing
+                // controls and reflows them when collapsed.
                 Section {
-                    ForEach(group.profiles) { profile in
-                        sidebarProfileRow(
-                            profile,
-                            groupID: group.id,
-                            index: group.profiles.firstIndex(where: { $0.id == profile.id }) ?? 0
-                        )
+                    if !collapsedGroups.contains(group.id) {
+                        ForEach(group.profiles) { profile in
+                            sidebarProfileRow(
+                                profile,
+                                groupID: group.id,
+                                index: group.profiles.firstIndex(where: { $0.id == profile.id }) ?? 0
+                            )
+                        }
                     }
                     if sidebarDropFeedback == .group(group.id, .after) {
                         insertionDropIndicator
@@ -388,6 +415,10 @@ struct MainWindowView: View {
             }
         }
         .listStyle(.sidebar)
+        .focused($sidebarHasFocus)
+        .onKeyPress(.return) {
+            toggleSelectedProfileActivation() ? .handled : .ignored
+        }
         .overlay {
             if presentation.showsEmptyState {
                 sidebarEmptyState
@@ -396,6 +427,28 @@ struct MainWindowView: View {
         }
         .navigationSplitViewColumnWidth(min: 200, ideal: 236)
         .safeAreaInset(edge: .bottom, spacing: 0) { newItemBar }
+    }
+
+    /// Return on the sidebar mirrors clicking the selected profile's activation
+    /// control. Returns false when the key is not for us — no profile selected,
+    /// activation disabled, or a group rename field waiting for its Return.
+    private func toggleSelectedProfileActivation() -> Bool {
+        guard groupPendingRename == nil,
+              case .profile(let profileID) = selection,
+              store.profile(profileID) != nil,
+              !presentation.activationControlsDisabled else { return false }
+        store.setProfileActive(profileID, !store.isActive(profileID))
+        return true
+    }
+
+    private func toggleGroupCollapsed(_ id: HostflipCore.Group.ID) {
+        withAnimation {
+            if collapsedGroups.contains(id) {
+                collapsedGroups.remove(id)
+            } else {
+                collapsedGroups.insert(id)
+            }
+        }
     }
 
     private var sidebarEmptyState: some View {
@@ -449,6 +502,9 @@ struct MainWindowView: View {
             .padding(.top, 8)
             .padding(.bottom, 10)
         }
+        // The list scrolls under this inset; without a backing material the rows
+        // show through and collide with the New button.
+        .background(.bar)
     }
 
     private func sidebarProfileRow(
@@ -476,6 +532,7 @@ struct MainWindowView: View {
             .highPriorityGesture(
                 TapGesture().onEnded {
                     selection = .profile(profile.id)
+                    sidebarHasFocus = true
                 }
             )
             .accessibilityLabel(profile.name)
@@ -495,8 +552,9 @@ struct MainWindowView: View {
                 .help("Profile Actions")
                 .accessibilityLabel("Actions for \(profile.name)")
                 if hoveredSidebarActions == item {
-                    RoundedRectangle(cornerRadius: 5)
+                    Circle()
                         .fill(Color.primary.opacity(0.10))
+                        .frame(width: 22, height: 22)
                         .allowsHitTesting(false)
                 }
                 Image(systemName: "ellipsis")
@@ -585,6 +643,9 @@ struct MainWindowView: View {
                     item: item,
                     name: group.name
                 ))
+                // Scoped to the name area so it can never race the ⋯ menu or the
+                // chevron button for a click.
+                .onTapGesture { toggleGroupCollapsed(group.id) }
             }
             ZStack {
                 Menu {
@@ -601,8 +662,9 @@ struct MainWindowView: View {
                 .help("Group Actions")
                 .accessibilityLabel("Actions for \(group.name)")
                 if hoveredSidebarActions == item {
-                    RoundedRectangle(cornerRadius: 5)
+                    Circle()
                         .fill(Color.primary.opacity(0.10))
+                        .frame(width: 22, height: 22)
                         .allowsHitTesting(false)
                 }
                 Image(systemName: "ellipsis")
@@ -613,6 +675,23 @@ struct MainWindowView: View {
             .frame(width: 28, height: 28)
             .contentShape(Rectangle())
             .onHover { updateSidebarActionHover(item, hovering: $0) }
+            // Always-visible chevron in a fixed trailing slot (group names vary in
+            // width, so a name-adjacent chevron would wander); the hover-only ⋯ sits
+            // just inside it. A tap gesture, not a Button: a Button's action runs in
+            // its own transaction, which drops withAnimation on the list's row diff.
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .rotationEffect(.degrees(collapsedGroups.contains(group.id) ? 0 : 90))
+                .frame(width: 16, height: 28)
+                .contentShape(Rectangle())
+                .onTapGesture { toggleGroupCollapsed(group.id) }
+                .help(collapsedGroups.contains(group.id) ? "Expand Group" : "Collapse Group")
+                .accessibilityLabel(
+                    collapsedGroups.contains(group.id)
+                        ? "Expand \(group.name)" : "Collapse \(group.name)"
+                )
+                .accessibilityAddTraits(.isButton)
         }
         .padding(.horizontal, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -747,6 +826,7 @@ struct MainWindowView: View {
             systemImage = isActive ? "largecircle.fill.circle" : "circle"
         }
         return Button {
+            guard !presentation.activationControlsDisabled else { return }
             store.setProfileActive(profile.id, !isActive)
         } label: {
             Image(systemName: systemImage)
@@ -758,7 +838,7 @@ struct MainWindowView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(presentation.activationControlsDisabled)
+        .disabled(presentation.activationControlsDimmed)
         .opacity(presentation.profilesAreEffective ? 1 : 0.55)
         .accessibilityLabel(isActive ? "Deactivate \(profile.name)" : "Activate \(profile.name)")
         .accessibilityValue(isActive ? "Active" : "Inactive")
@@ -782,6 +862,7 @@ struct MainWindowView: View {
 
     private func updateSidebarHover(_ item: SidebarDragItem, hovering: Bool) {
         if hovering {
+            clearStaleDragState()
             hoveredSidebarItem = item
         } else if hoveredSidebarItem == item {
             hoveredSidebarItem = nil
@@ -790,10 +871,21 @@ struct MainWindowView: View {
 
     private func updateSidebarActionHover(_ item: SidebarDragItem, hovering: Bool) {
         if hovering {
+            clearStaleDragState()
             hoveredSidebarActions = item
         } else if hoveredSidebarActions == item {
             hoveredSidebarActions = nil
         }
+    }
+
+    /// Hover events are never delivered while an AppKit drag session is tracking, so
+    /// drag state still set when one arrives means the drag ended outside every drop
+    /// target (the drag preview's onDisappear is unreliable for cancelled drags).
+    /// Left in place, it suppresses hover highlights and the row action buttons.
+    private func clearStaleDragState() {
+        guard draggedSidebarItem != nil else { return }
+        draggedSidebarItem = nil
+        sidebarDropFeedback = nil
     }
 
     private var insertionDropIndicator: some View {
@@ -1382,6 +1474,7 @@ private struct ProfileEditorPane: View {
         let isSelectedActive = store.isActive(profile.id)
         let isEffective = isSelectedActive && presentation.profilesAreEffective
         return Button {
+            guard !presentation.activationControlsDisabled else { return }
             store.setProfileActive(profile.id, !isSelectedActive)
         } label: {
             Label(
@@ -1397,7 +1490,7 @@ private struct ProfileEditorPane: View {
                 )
         }
         .buttonStyle(.plain)
-        .disabled(presentation.activationControlsDisabled)
+        .disabled(presentation.activationControlsDimmed)
     }
 
     private var locationDescription: String {

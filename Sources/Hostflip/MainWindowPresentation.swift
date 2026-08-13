@@ -14,7 +14,12 @@ struct MainWindowPresentation: Equatable {
 
     let banner: Banner?
     let profilesAreEffective: Bool
+    /// Clicks on activation controls are ignored — includes the sub-second window
+    /// while a switch is in flight.
     let activationControlsDisabled: Bool
+    /// Activation controls draw dimmed — persistent blocks only (paused, drift);
+    /// an in-flight switch must not flash every row's control.
+    let activationControlsDimmed: Bool
     let showsEmptyState: Bool
 
     init(
@@ -41,6 +46,7 @@ struct MainWindowPresentation: Equatable {
         }
         self.profilesAreEffective = !isPaused
         self.activationControlsDisabled = isPaused || hasHostsDrift || isSwitching
+        self.activationControlsDimmed = isPaused || hasHostsDrift
         self.showsEmptyState = profileCount == 0
     }
 }
