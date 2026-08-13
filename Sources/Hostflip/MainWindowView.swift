@@ -55,6 +55,12 @@ struct MainWindowView: View {
                     guard hovering != isHovering else { return }
                     isHovering = hovering
                     if hovering {
+                        // Same stale-drag cleanup as the row-level hover handlers:
+                        // hover events cannot arrive while a drag session is tracking.
+                        if draggedItem != nil {
+                            draggedItem = nil
+                            feedback = nil
+                        }
                         hoveredItem = item
                         NSCursor.openHand.push()
                     } else {
@@ -823,6 +829,7 @@ struct MainWindowView: View {
 
     private func updateSidebarHover(_ item: SidebarDragItem, hovering: Bool) {
         if hovering {
+            clearStaleDragState()
             hoveredSidebarItem = item
         } else if hoveredSidebarItem == item {
             hoveredSidebarItem = nil
@@ -831,10 +838,21 @@ struct MainWindowView: View {
 
     private func updateSidebarActionHover(_ item: SidebarDragItem, hovering: Bool) {
         if hovering {
+            clearStaleDragState()
             hoveredSidebarActions = item
         } else if hoveredSidebarActions == item {
             hoveredSidebarActions = nil
         }
+    }
+
+    /// Hover events are never delivered while an AppKit drag session is tracking, so
+    /// drag state still set when one arrives means the drag ended outside every drop
+    /// target (the drag preview's onDisappear is unreliable for cancelled drags).
+    /// Left in place, it suppresses hover highlights and the row action buttons.
+    private func clearStaleDragState() {
+        guard draggedSidebarItem != nil else { return }
+        draggedSidebarItem = nil
+        sidebarDropFeedback = nil
     }
 
     private var insertionDropIndicator: some View {
