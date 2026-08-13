@@ -76,11 +76,86 @@ final class MaintenanceStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testApprovalPollingReflectsExternalApprovalWithoutManualRefresh() async {
+        let helper = HelperMaintenanceStub(status: .requiresApproval)
+        let gate = PollGate()
+        let store = MaintenanceStore(
+            helperStatus: { await helper.currentStatus() },
+            unregisterHelper: { try await helper.unregister() },
+            wait: { _ in await gate.waitForTick() }
+        )
+
+        await store.refreshHelperStatus()
+        XCTAssertEqual(store.helperStatus, .requiresApproval)
+
+        // Approve externally (the System Settings toggle), then release one poll cycle.
+        await helper.setStatus(.enabled)
+        await gate.tick()
+        await waitUntil { store.helperStatus == .enabled }
+        XCTAssertEqual(store.helperStatus, .enabled)
+    }
+
+    @MainActor
+    func testApprovalPollingStopsOnceStatusSettles() async {
+        let helper = HelperMaintenanceStub(status: .requiresApproval)
+        let gate = PollGate()
+        let store = MaintenanceStore(
+            helperStatus: { await helper.currentStatus() },
+            unregisterHelper: { try await helper.unregister() },
+            wait: { _ in await gate.waitForTick() }
+        )
+
+        await store.refreshHelperStatus()
+        await helper.setStatus(.enabled)
+        await gate.tick()
+        await waitUntil { store.helperStatus == .enabled }
+
+        // A settled poll loop must not pick this up: no cycle should still be waiting.
+        await helper.setStatus(.requiresApproval)
+        await gate.tick()
+        for _ in 0 ..< 50 { await Task.yield() }
+        XCTAssertEqual(store.helperStatus, .enabled, "轮询应在批准后停止")
+    }
+
+    /// Yields until the condition holds (the poll task needs a few actor hops to land).
+    @MainActor
+    private func waitUntil(_ condition: () -> Bool) async {
+        for _ in 0 ..< 1000 {
+            if condition() { return }
+            await Task.yield()
+        }
+        XCTFail("等待条件超时")
+    }
+
+    @MainActor
     private func makeStore(helper: HelperMaintenanceStub) -> MaintenanceStore {
         MaintenanceStore(
             helperStatus: { await helper.currentStatus() },
             unregisterHelper: { try await helper.unregister() }
         )
+    }
+}
+
+/// Deterministic stand-in for the poll interval: each waitForTick() suspends until
+/// the test releases it with tick().
+private actor PollGate {
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var pendingTicks = 0
+
+    func waitForTick() async {
+        if pendingTicks > 0 {
+            pendingTicks -= 1
+            return
+        }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func tick() {
+        if waiters.isEmpty {
+            pendingTicks += 1
+        } else {
+            waiters.removeFirst().resume()
+        }
     }
 }
 
