@@ -197,6 +197,11 @@ struct MainWindowView: View {
     @State private var hoveredSidebarActions: SidebarDragItem?
     @FocusState private var focusedGroupName: HostflipCore.Group.ID?
     @FocusState private var focusedSidebarActions: SidebarDragItem?
+    /// The row name's custom tap gesture (it coexists with the drag source) selects
+    /// without giving the list first-responder status the way a native row click
+    /// does; tracking focus lets that gesture hand it back, so the selection shows
+    /// emphasized and the Return shortcut is live right after a click.
+    @FocusState private var sidebarHasFocus: Bool
 
     /// Live workspace queries: each proposal re-asks the store (items can
     /// vanish mid-drag), reusing its existing lookups instead of copying IDs.
@@ -256,7 +261,15 @@ struct MainWindowView: View {
         }
         .navigationTitle("hostflip")
         .modifier(HideWindowToolbarTitle())
-        .onAppear { store.loadIfNeeded() }
+        .onAppear {
+            store.loadIfNeeded()
+            // The window opens with the sidebar holding key focus, so the default
+            // selection shows emphasized and Return works before any click.
+            // defaultFocus does not reach a List inside NavigationSplitView on
+            // macOS, and setting FocusState during view installation is dropped —
+            // defer it one runloop turn.
+            DispatchQueue.main.async { sidebarHasFocus = true }
+        }
         .task(id: store.switchFeedback) {
             await maintenanceStore.refreshHelperStatus()
             guard store.switchFeedback == .merged else { return }
@@ -402,6 +415,10 @@ struct MainWindowView: View {
             }
         }
         .listStyle(.sidebar)
+        .focused($sidebarHasFocus)
+        .onKeyPress(.return) {
+            toggleSelectedProfileActivation() ? .handled : .ignored
+        }
         .overlay {
             if presentation.showsEmptyState {
                 sidebarEmptyState
@@ -410,6 +427,18 @@ struct MainWindowView: View {
         }
         .navigationSplitViewColumnWidth(min: 200, ideal: 236)
         .safeAreaInset(edge: .bottom, spacing: 0) { newItemBar }
+    }
+
+    /// Return on the sidebar mirrors clicking the selected profile's activation
+    /// control. Returns false when the key is not for us — no profile selected,
+    /// activation disabled, or a group rename field waiting for its Return.
+    private func toggleSelectedProfileActivation() -> Bool {
+        guard groupPendingRename == nil,
+              case .profile(let profileID) = selection,
+              store.profile(profileID) != nil,
+              !presentation.activationControlsDisabled else { return false }
+        store.setProfileActive(profileID, !store.isActive(profileID))
+        return true
     }
 
     private func toggleGroupCollapsed(_ id: HostflipCore.Group.ID) {
@@ -503,6 +532,7 @@ struct MainWindowView: View {
             .highPriorityGesture(
                 TapGesture().onEnded {
                     selection = .profile(profile.id)
+                    sidebarHasFocus = true
                 }
             )
             .accessibilityLabel(profile.name)
