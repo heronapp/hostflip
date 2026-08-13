@@ -63,3 +63,6 @@ fastlane/test_output
 
 # hostflip packaging output (scripts/build-app.sh)
 build/
+
+# macOS
+.DS_Store
