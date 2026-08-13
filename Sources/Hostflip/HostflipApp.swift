@@ -67,6 +67,8 @@ struct HostflipApp: App {
 
         Settings {
             ApplicationSettingsView(
+                store: store,
+                maintenanceStore: maintenanceStore,
                 dockIconStore: dockIconStore,
                 launchAtLoginStore: launchAtLoginStore,
                 updater: updaterController.updater

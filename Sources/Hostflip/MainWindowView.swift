@@ -175,7 +175,6 @@ struct MainWindowView: View {
 
     let store: WorkspaceStore
     let maintenanceStore: MaintenanceStore
-    @Environment(\.scenePhase) private var scenePhase
     @State private var selection: SidebarItem? = .baseHosts
     /// The profile pending deletion confirmation; a non-nil value shows the confirmation dialog.
     @State private var profilePendingDeletion: Profile?
@@ -265,8 +264,13 @@ struct MainWindowView: View {
                 selection = .baseHosts
             }
         }
-        .onChange(of: scenePhase) {
-            guard scenePhase == .active else { return }
+        // App activation, not scenePhase: on macOS the phase only flips when every
+        // window closes, so returning from System Settings never triggered it.
+        // SMAppService posts no status-change notification; re-reading on activation
+        // is the DTS-recommended way to catch toggles made in System Settings.
+        .onReceive(
+            NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+        ) { _ in
             store.refreshSystemHosts()
             Task { await maintenanceStore.refreshHelperStatus() }
         }

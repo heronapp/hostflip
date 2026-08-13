@@ -36,17 +36,49 @@ final class MaintenanceStore {
 
     private let loadHelperStatus: @Sendable () async -> DaemonRegistrationStatus
     private let unregisterHelper: @Sendable () async throws -> Void
+    private let wait: @Sendable (Duration) async -> Void
+    @ObservationIgnored private var approvalPollTask: Task<Void, Never>?
 
+    /// The wait closure is an injection seam so tests can skip the real poll interval.
     init(
         helperStatus: @escaping @Sendable () async -> DaemonRegistrationStatus,
-        unregisterHelper: @escaping @Sendable () async throws -> Void
+        unregisterHelper: @escaping @Sendable () async throws -> Void,
+        wait: @escaping @Sendable (Duration) async -> Void = { try? await Task.sleep(for: $0) }
     ) {
         loadHelperStatus = helperStatus
         self.unregisterHelper = unregisterHelper
+        self.wait = wait
     }
 
     func refreshHelperStatus() async {
         helperStatus = await loadHelperStatus()
+        updateApprovalPolling()
+    }
+
+    /// SMAppService offers no status-change notification, so while approval is pending
+    /// the store polls: the toggle flipped in System Settings unblocks the UI without
+    /// the user having to switch back to the app first. The loop is bounded — it only
+    /// runs while the status stays `requiresApproval` and stops itself on any other
+    /// answer.
+    private func updateApprovalPolling() {
+        guard helperStatus == .requiresApproval else {
+            approvalPollTask?.cancel()
+            approvalPollTask = nil
+            return
+        }
+        guard approvalPollTask == nil else { return }
+        approvalPollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                await self.wait(.seconds(2))
+                if Task.isCancelled { return }
+                self.helperStatus = await self.loadHelperStatus()
+                if self.helperStatus != .requiresApproval {
+                    self.approvalPollTask = nil
+                    return
+                }
+            }
+        }
     }
 
     func removeHelper() async {
@@ -65,6 +97,7 @@ final class MaintenanceStore {
                 "Could not remove the helper. Try again. Your profiles were not changed. \(error.localizedDescription)"
             )
         }
+        updateApprovalPolling()
     }
 
 }
