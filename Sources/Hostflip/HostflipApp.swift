@@ -82,16 +82,11 @@ private struct MenuBarLabel: View {
     let applicationDelegate: ApplicationLifecycleDelegate
 
     var body: some View {
-        HostflipGlyph(tint: iconTint, alpha: store.isPaused ? 0.45 : 1)
+        HostflipGlyph(
+            alpha: store.isPaused ? 0.45 : 1,
+            showsAlertDot: store.hasHostsDrift
+        )
             .frame(width: 18, height: 18)
-            .overlay(alignment: .topTrailing) {
-                if store.hasHostsDrift {
-                    Circle()
-                        .fill(.red)
-                        .frame(width: 6, height: 6)
-                        .offset(x: 2, y: -1)
-                }
-            }
             .accessibilityLabel(accessibilityLabelText)
             .background {
                 MainWindowActionInstaller(
@@ -100,16 +95,9 @@ private struct MenuBarLabel: View {
             }
     }
 
-    /// Accent tint marks "at least one profile is in the merge"; paused or idle stays monochrome.
-    private var iconTint: NSColor? {
-        guard !store.isPaused, store.model?.activeProfileIDs.isEmpty == false else { return nil }
-        return .controlAccentColor
-    }
-
     private var accessibilityLabelText: String {
         var label = "Hostflip"
         if store.isPaused { label += ", paused" }
-        if iconTint != nil { label += ", profiles active" }
         if store.hasHostsDrift { label += ", hosts drift detected" }
         return label
     }

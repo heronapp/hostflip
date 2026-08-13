@@ -2,24 +2,25 @@ import AppKit
 import SwiftUI
 
 /// The hostflip menu bar icon: two host posts and a flippable crossbar.
-/// Renders as a monochrome template by default; a tint opts out of template
-/// mode because the status bar strips per-view foreground colors otherwise.
-/// Dimming is baked into the image alpha for the same reason: the status bar
-/// also flattens view-level `.opacity`.
+/// Renders as a monochrome template by default. All state is baked into the
+/// image because the status bar strips per-view foreground colors, view-level
+/// `.opacity`, and overlay content from the label: dimming lowers the drawing
+/// alpha, and the drift alert draws a red dot in a non-template image whose
+/// glyph uses the dynamic label color instead.
 struct HostflipGlyph: View {
-    var tint: NSColor?
     var alpha: CGFloat = 1
+    var showsAlertDot = false
 
     var body: some View {
-        Image(nsImage: Self.makeImage(tint: tint, alpha: alpha))
-            .renderingMode(tint == nil ? .template : .original)
+        Image(nsImage: Self.makeImage(alpha: alpha, alertDot: showsAlertDot))
+            .renderingMode(showsAlertDot ? .original : .template)
             .resizable()
             .aspectRatio(1, contentMode: .fit)
             .accessibilityHidden(true)
     }
 
-    static func makeImage(tint: NSColor? = nil, alpha: CGFloat = 1) -> NSImage {
-        let color = (tint ?? .black).withAlphaComponent(alpha)
+    static func makeImage(alpha: CGFloat = 1, alertDot: Bool = false) -> NSImage {
+        let color = (alertDot ? NSColor.labelColor : .black).withAlphaComponent(alpha)
         let image = NSImage(
             size: NSSize(width: 18, height: 18),
             flipped: true
@@ -46,9 +47,16 @@ struct HostflipGlyph: View {
             NSBezierPath(
                 ovalIn: NSRect(x: 7.85, y: 8.35, width: 2.3, height: 2.3)
             ).fill()
+
+            if alertDot {
+                NSColor.systemRed.setFill()
+                NSBezierPath(
+                    ovalIn: NSRect(x: 12, y: 0, width: 6, height: 6)
+                ).fill()
+            }
             return true
         }
-        image.isTemplate = tint == nil
+        image.isTemplate = !alertDot
         return image
     }
 }

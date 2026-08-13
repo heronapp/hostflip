@@ -23,16 +23,16 @@ final class HostflipGlyphTests: XCTestCase {
         XCTAssertTrue(containsVisiblePixels)
     }
 
-    func testTintedImageOptsOutOfTemplateRendering() {
-        let image = HostflipGlyph.makeImage(tint: .systemBlue)
-
-        XCTAssertEqual(image.size, NSSize(width: 18, height: 18))
-        XCTAssertFalse(image.isTemplate)
-    }
-
     func testDimmedImageStaysTemplate() {
         let image = HostflipGlyph.makeImage(alpha: 0.45)
 
         XCTAssertTrue(image.isTemplate)
+    }
+
+    func testAlertDotImageOptsOutOfTemplateRendering() {
+        let image = HostflipGlyph.makeImage(alertDot: true)
+
+        XCTAssertEqual(image.size, NSSize(width: 18, height: 18))
+        XCTAssertFalse(image.isTemplate)
     }
 }
