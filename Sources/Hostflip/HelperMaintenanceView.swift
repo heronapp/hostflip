@@ -125,6 +125,7 @@ struct HelperMaintenanceView: View {
                         Text(feedbackPresentation.title)
                             .fontWeight(.semibold)
                         Text(feedbackPresentation.message)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 } icon: {
                     Image(
