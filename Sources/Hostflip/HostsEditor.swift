@@ -10,6 +10,11 @@ import SwiftUI
 struct HostsEditor: NSViewRepresentable {
     @Binding var text: String
     var isEditable = true
+    /// Identity of the document being shown. A persistent editor instance switches documents in
+    /// place (the detail pane reuses one NSScrollView so switching never re-creates the text
+    /// system, which would flash a zero-sized editor for a frame); a change of identity resets
+    /// the per-document view state: undo stack, selection, scroll position, and the find bar.
+    var documentID: AnyHashable = "single-document"
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSTextView.scrollableTextView()
@@ -57,23 +62,47 @@ struct HostsEditor: NSViewRepresentable {
         let textView = scrollView.documentView as! NSTextView
         textView.isEditable = isEditable
         textView.allowsUndo = isEditable
+        let documentChanged = context.coordinator.documentID != documentID
+        if documentChanged {
+            context.coordinator.documentID = documentID
+            // The undo stack belongs to the previous document; replaying it into this one
+            // would splice the old document's text in.
+            context.coordinator.textUndoManager.removeAllActions()
+            // TextFinder highlights reference the previous content; drop the bar with them.
+            if scrollView.isFindBarVisible {
+                scrollView.isFindBarVisible = false
+            }
+        }
         if textView.string != text { // guard against the delegate write-back loop
             textView.string = text
             Self.highlight(textView)
             scrollView.verticalRulerView?.needsDisplay = true
         }
+        if documentChanged {
+            textView.setSelectedRange(NSRange(location: 0, length: 0))
+            textView.scroll(.zero)
+        }
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text)
+        Coordinator(text: $text, documentID: documentID)
     }
 
     @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
         var text: Binding<String>
+        var documentID: AnyHashable
+        /// Dedicated undo manager so clearing it on a document switch cannot touch
+        /// undo state registered elsewhere in the window (e.g. the name field).
+        let textUndoManager = UndoManager()
 
-        init(text: Binding<String>) {
+        init(text: Binding<String>, documentID: AnyHashable) {
             self.text = text
+            self.documentID = documentID
+        }
+
+        func undoManager(for view: NSTextView) -> UndoManager? {
+            textUndoManager
         }
 
         func textDidChange(_ notification: Notification) {
