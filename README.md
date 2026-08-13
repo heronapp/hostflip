@@ -18,7 +18,7 @@ Editing `/etc/hosts` by hand — or typing your password every time a hosts mana
 - **Pause everything.** One master switch restores your baseline hosts while remembering every profile's state.
 
 <p align="center">
-  <img src="docs/screenshots/menu-bar.png" width="343" alt="Quick switching from the menu bar: groups as submenus, one active profile per group">
+  <img src="docs/screenshots/menu-bar.png" width="293" alt="Quick switching from the menu bar: standalone profiles on top, groups as submenus with each group's active profile shown as a badge">
 </p>
 
 ![Drift review: external changes to the system hosts shown as a diff before reconciling](docs/screenshots/drift-review.png)
