@@ -1,22 +1,27 @@
 import AppKit
 import SwiftUI
 
-/// The hostflip menu bar template icon: two host posts and a flippable crossbar.
+/// The hostflip menu bar icon: two host posts and a flippable crossbar.
+/// Renders as a monochrome template by default; a tint opts out of template
+/// mode because the status bar strips per-view foreground colors otherwise.
 struct HostflipGlyph: View {
+    var tint: NSColor?
+
     var body: some View {
-        Image(nsImage: Self.makeTemplateImage())
-            .renderingMode(.template)
+        Image(nsImage: Self.makeImage(tint: tint))
+            .renderingMode(tint == nil ? .template : .original)
             .resizable()
             .aspectRatio(1, contentMode: .fit)
             .accessibilityHidden(true)
     }
 
-    static func makeTemplateImage() -> NSImage {
+    static func makeImage(tint: NSColor? = nil) -> NSImage {
+        let color = tint ?? .black
         let image = NSImage(
             size: NSSize(width: 18, height: 18),
             flipped: true
         ) { _ in
-            NSColor.black.setStroke()
+            color.setStroke()
 
             let posts = NSBezierPath()
             posts.lineWidth = 2.5
@@ -34,13 +39,13 @@ struct HostflipGlyph: View {
             crossbar.line(to: NSPoint(x: 11.8, y: 8.85))
             crossbar.stroke()
 
-            NSColor.black.setFill()
+            color.setFill()
             NSBezierPath(
                 ovalIn: NSRect(x: 7.85, y: 8.35, width: 2.3, height: 2.3)
             ).fill()
             return true
         }
-        image.isTemplate = true
+        image.isTemplate = tint == nil
         return image
     }
 }

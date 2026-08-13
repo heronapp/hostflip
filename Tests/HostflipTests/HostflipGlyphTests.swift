@@ -5,7 +5,7 @@ import XCTest
 @MainActor
 final class HostflipGlyphTests: XCTestCase {
     func testTemplateImageContainsVisiblePixels() throws {
-        let image = HostflipGlyph.makeTemplateImage()
+        let image = HostflipGlyph.makeImage()
 
         XCTAssertEqual(image.size, NSSize(width: 18, height: 18))
         XCTAssertTrue(image.isTemplate)
@@ -21,5 +21,12 @@ final class HostflipGlyphTests: XCTestCase {
         }
 
         XCTAssertTrue(containsVisiblePixels)
+    }
+
+    func testTintedImageOptsOutOfTemplateRendering() {
+        let image = HostflipGlyph.makeImage(tint: .systemBlue)
+
+        XCTAssertEqual(image.size, NSSize(width: 18, height: 18))
+        XCTAssertFalse(image.isTemplate)
     }
 }
