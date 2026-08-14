@@ -313,7 +313,7 @@ final class WorkspaceTests: XCTestCase {
                 group.addTask { try workspace.recordLastWrittenHash(hash) }
                 try await group.waitForAll()
             }
-            XCTAssertEqual(try workspace.lastWrittenHash(), hash, "第 \(iteration) 轮丢失回写的哈希")
+            XCTAssertEqual(try workspace.lastWrittenHash(), hash, "round \(iteration) lost the recorded hash")
         }
     }
 
@@ -409,7 +409,7 @@ final class WorkspaceTests: XCTestCase {
     func testSaveWaitsForAForeignManifestLockHolder() throws {
         let workspace = Workspace(rootDirectory: rootDirectory)
         let model = try workspace.open(systemHosts: { "127.0.0.1 localhost" })
-        XCTAssertTrue(workspaceFileExists("manifest.lock"), "锁应落在专用 lock 文件上，与 manifest 本体分离")
+        XCTAssertTrue(workspaceFileExists("manifest.lock"), "the lock must live on the dedicated lock file, separate from the manifest itself")
 
         let foreign = try acquireForeignManifestLock()
         defer { close(foreign) }
@@ -419,16 +419,16 @@ final class WorkspaceTests: XCTestCase {
             do {
                 try workspace.save(model)
             } catch {
-                XCTFail("save 失败：\(error)")
+                XCTFail("save failed: \(error)")
             }
             finished.set()
         }
 
         Thread.sleep(forTimeInterval: 0.3)
-        XCTAssertFalse(finished.isSet, "外部进程持锁期间 save 不应完成")
+        XCTAssertFalse(finished.isSet, "save must not complete while a foreign process holds the lock")
 
         XCTAssertEqual(flock(foreign, LOCK_UN), 0)
-        XCTAssertTrue(finished.wait(timeout: 5), "外部锁释放后 save 应完成")
+        XCTAssertTrue(finished.wait(timeout: 5), "save must complete once the foreign lock is released")
     }
 
     func testForeignReadModifyWriteUnderTheLockLosesNoUpdate() throws {
@@ -451,21 +451,21 @@ final class WorkspaceTests: XCTestCase {
             do {
                 try workspace.recordLastWrittenHash("cross-process")
             } catch {
-                XCTFail("recordLastWrittenHash 失败：\(error)")
+                XCTFail("recordLastWrittenHash failed: \(error)")
             }
             finished.set()
         }
         Thread.sleep(forTimeInterval: 0.3)
-        XCTAssertFalse(finished.isSet, "外部进程持锁期间哈希回写不应完成")
+        XCTAssertFalse(finished.isSet, "the hash record must not complete while a foreign process holds the lock")
 
         // The foreign process's "modify-write" step: atomically replace the manifest, then release the lock
         foreignManifest["isPaused"] = true
         try JSONSerialization.data(withJSONObject: foreignManifest).write(to: manifestURL, options: .atomic)
         XCTAssertEqual(flock(foreign, LOCK_UN), 0)
 
-        XCTAssertTrue(finished.wait(timeout: 5), "外部锁释放后哈希回写应完成")
+        XCTAssertTrue(finished.wait(timeout: 5), "the hash record must complete once the foreign lock is released")
         XCTAssertEqual(try workspace.lastWrittenHash(), "cross-process")
-        XCTAssertTrue(try reopenWithoutImporting(workspace).isPaused, "外部在锁内写入的更新不得被覆盖")
+        XCTAssertTrue(try reopenWithoutImporting(workspace).isPaused, "an update a foreign process wrote under the lock must not be overwritten")
     }
 
     func testSaveUnderTheLockPreservesAForeignlyRecordedHash() throws {
@@ -487,19 +487,19 @@ final class WorkspaceTests: XCTestCase {
             do {
                 try workspace.save(model)
             } catch {
-                XCTFail("save 失败：\(error)")
+                XCTFail("save failed: \(error)")
             }
             finished.set()
         }
         Thread.sleep(forTimeInterval: 0.3)
-        XCTAssertFalse(finished.isSet, "外部进程持锁期间 save 不应完成")
+        XCTAssertFalse(finished.isSet, "save must not complete while a foreign process holds the lock")
 
         foreignManifest["lastWrittenHash"] = "foreign-hash"
         try JSONSerialization.data(withJSONObject: foreignManifest).write(to: manifestURL, options: .atomic)
         XCTAssertEqual(flock(foreign, LOCK_UN), 0)
 
-        XCTAssertTrue(finished.wait(timeout: 5), "外部锁释放后 save 应完成")
-        XCTAssertEqual(try workspace.lastWrittenHash(), "foreign-hash", "外部在锁内回写的哈希不得被 save 重置")
+        XCTAssertTrue(finished.wait(timeout: 5), "save must complete once the foreign lock is released")
+        XCTAssertEqual(try workspace.lastWrittenHash(), "foreign-hash", "a hash a foreign process recorded under the lock must not be reset by save")
     }
 
     func testALeftoverLockFileFromACrashDoesNotBlockAnything() throws {
@@ -534,7 +534,7 @@ final class WorkspaceTests: XCTestCase {
         })
 
         guard case .saved(let saved) = outcome else {
-            return XCTFail("在最新状态上重放应当成功保存")
+            return XCTFail("replaying on the latest state must save successfully")
         }
         XCTAssertEqual(saved.standaloneProfiles.map(\.id), [.init("cli"), .init("gui")])
         XCTAssertEqual(saved.activeProfileIDs, [.init("cli")])
@@ -574,7 +574,7 @@ final class WorkspaceTests: XCTestCase {
         })
 
         guard case .conflict(let latest, let reason) = outcome else {
-            return XCTFail("在被外部删除的 profile 上重放应当报告冲突")
+            return XCTFail("replaying on a foreignly deleted profile must report a conflict")
         }
         XCTAssertEqual(latest.standaloneProfiles, [])
         XCTAssertEqual(
@@ -617,14 +617,14 @@ final class WorkspaceTests: XCTestCase {
     private func acquireForeignManifestLock() throws -> Int32 {
         let path = rootDirectory.appendingPathComponent("manifest.lock").path
         let fd = Darwin.open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0o644)
-        let locked = try XCTUnwrap(fd >= 0 ? fd : nil, "打开 manifest.lock 失败")
+        let locked = try XCTUnwrap(fd >= 0 ? fd : nil, "failed to open manifest.lock")
         XCTAssertEqual(flock(locked, LOCK_EX), 0)
         return locked
     }
 
     private func reopenWithoutImporting(_ workspace: Workspace) throws -> ActivationModel {
         try workspace.open(systemHosts: {
-            XCTFail("已初始化的工作区不应再读取系统 hosts")
+            XCTFail("an initialized workspace must not read the system hosts again")
             return ""
         })
     }

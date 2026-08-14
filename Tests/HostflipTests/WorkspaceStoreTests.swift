@@ -1011,7 +1011,7 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertFalse(store.hasHostsDrift)
         XCTAssertNotNil(store.reconciliationError)
         guard case .failed = store.switchFeedback else {
-            return XCTFail("DNS 刷新失败应保留失败反馈")
+            return XCTFail("a DNS flush failure must keep the failure feedback")
         }
 
         monitor.report(false)
@@ -1076,7 +1076,7 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertNil(store.backgroundSyncError)
         XCTAssertNotNil(store.reconciliationError)
         guard case .failed = store.switchFeedback else {
-            return XCTFail("工作区保存失败后应保留失败反馈")
+            return XCTFail("a workspace save failure must keep the failure feedback")
         }
     }
 
@@ -1153,7 +1153,7 @@ final class WorkspaceStoreTests: XCTestCase {
 
         XCTAssertFalse(store.isActive(profileID))
         guard case .failed = store.switchFeedback else {
-            return XCTFail("应报告失败反馈，实际：\(String(describing: store.switchFeedback))")
+            return XCTFail("expected failure feedback, got: \(String(describing: store.switchFeedback))")
         }
         XCTAssertEqual(try reloadModel().activeProfileIDs, [])
     }
@@ -1244,7 +1244,7 @@ final class WorkspaceStoreTests: XCTestCase {
 
         XCTAssertFalse(store.isActive(profileID))
         guard case .failed = store.switchFeedback else {
-            return XCTFail("应报告失败反馈，实际：\(String(describing: store.switchFeedback))")
+            return XCTFail("expected failure feedback, got: \(String(describing: store.switchFeedback))")
         }
     }
 
@@ -1321,7 +1321,7 @@ final class WorkspaceStoreTests: XCTestCase {
         let outcome = store.importFiles(at: urls)
 
         guard case .failed(let message) = outcome else {
-            return XCTFail("导入应整体失败，实际结果：\(outcome)")
+            return XCTFail("the import must fail as a whole, got: \(outcome)")
         }
         XCTAssertTrue(message.contains("bad.json"), message)
         XCTAssertTrue(store.standaloneProfiles.isEmpty)
@@ -1341,7 +1341,7 @@ final class WorkspaceStoreTests: XCTestCase {
         let outcome = store.importFiles(at: [url])
 
         guard case .failed = outcome else {
-            return XCTFail("保存失败时导入应失败，实际结果：\(outcome)")
+            return XCTFail("the import must fail when saving fails, got: \(outcome)")
         }
         XCTAssertTrue(store.standaloneProfiles.isEmpty)
         XCTAssertNil(store.followUpMergeTask)
@@ -1591,13 +1591,13 @@ final class WorkspaceStoreTests: XCTestCase {
         do {
             let workspace = Workspace(rootDirectory: rootDirectory)
             var model = try workspace.open(systemHosts: {
-                XCTFail("已初始化的工作区不应再导入系统 hosts")
+                XCTFail("an initialized workspace must not capture the system hosts again")
                 return ""
             })
             try change(&model)
             try workspace.save(model)
         } catch {
-            XCTFail("外部修改工作区失败：\(error)")
+            XCTFail("foreign workspace modification failed: \(error)")
         }
     }
 
@@ -1627,7 +1627,7 @@ final class WorkspaceStoreTests: XCTestCase {
     /// Reloads with a fresh Workspace instance to verify persisted state; at this point the system hosts must never be imported again.
     private func reloadModel() throws -> ActivationModel {
         try Workspace(rootDirectory: rootDirectory).open(systemHosts: {
-            XCTFail("已初始化的工作区不应再导入系统 hosts")
+            XCTFail("an initialized workspace must not capture the system hosts again")
             return ""
         })
     }

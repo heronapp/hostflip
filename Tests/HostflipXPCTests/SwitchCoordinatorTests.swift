@@ -300,11 +300,11 @@ final class SwitchCoordinatorTests: XCTestCase {
 
         do {
             _ = try await coordinator.performSwitch(merged)
-            XCTFail("非通道错误应上抛")
+            XCTFail("a non-channel error must be rethrown")
         } catch let error as WorkspaceError {
             XCTAssertEqual(error, .notInitialized)
         } catch {
-            XCTFail("错误类型不符：\(error)")
+            XCTFail("unexpected error type: \(error)")
         }
     }
 }
