@@ -1,3 +1,4 @@
+import Darwin
 import XCTest
 @testable import HostflipCore
 
@@ -403,6 +404,132 @@ final class WorkspaceTests: XCTestCase {
         XCTAssertFalse(workspaceFileExists("hosts.orig"))
     }
 
+    // MARK: - Cross-process manifest lock (#50, ADR-0010 ①)
+
+    func testSaveWaitsForAForeignManifestLockHolder() throws {
+        let workspace = Workspace(rootDirectory: rootDirectory)
+        let model = try workspace.open(systemHosts: { "127.0.0.1 localhost" })
+        XCTAssertTrue(workspaceFileExists("manifest.lock"), "锁应落在专用 lock 文件上，与 manifest 本体分离")
+
+        let foreign = try acquireForeignManifestLock()
+        defer { close(foreign) }
+
+        let finished = CompletionFlag()
+        Thread.detachNewThread {
+            do {
+                try workspace.save(model)
+            } catch {
+                XCTFail("save 失败：\(error)")
+            }
+            finished.set()
+        }
+
+        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertFalse(finished.isSet, "外部进程持锁期间 save 不应完成")
+
+        XCTAssertEqual(flock(foreign, LOCK_UN), 0)
+        XCTAssertTrue(finished.wait(timeout: 5), "外部锁释放后 save 应完成")
+    }
+
+    func testForeignReadModifyWriteUnderTheLockLosesNoUpdate() throws {
+        // The CLI and the resident GUI are peer writers: a foreign holder reads then writes under
+        // the lock, so this process's hash write-back must wait for the release and re-read the state
+        // the foreign side wrote — both updates must land, neither side may overwrite the other.
+        let workspace = Workspace(rootDirectory: rootDirectory)
+        _ = try workspace.open(systemHosts: { "127.0.0.1 localhost" })
+
+        let foreign = try acquireForeignManifestLock()
+        defer { close(foreign) }
+        // The foreign process's "read" step inside the lock
+        let manifestURL = rootDirectory.appendingPathComponent("manifest.json")
+        var foreignManifest = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL)) as? [String: Any]
+        )
+
+        let finished = CompletionFlag()
+        Thread.detachNewThread {
+            do {
+                try workspace.recordLastWrittenHash("cross-process")
+            } catch {
+                XCTFail("recordLastWrittenHash 失败：\(error)")
+            }
+            finished.set()
+        }
+        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertFalse(finished.isSet, "外部进程持锁期间哈希回写不应完成")
+
+        // The foreign process's "modify-write" step: atomically replace the manifest, then release the lock
+        foreignManifest["isPaused"] = true
+        try JSONSerialization.data(withJSONObject: foreignManifest).write(to: manifestURL, options: .atomic)
+        XCTAssertEqual(flock(foreign, LOCK_UN), 0)
+
+        XCTAssertTrue(finished.wait(timeout: 5), "外部锁释放后哈希回写应完成")
+        XCTAssertEqual(try workspace.lastWrittenHash(), "cross-process")
+        XCTAssertTrue(try reopenWithoutImporting(workspace).isPaused, "外部在锁内写入的更新不得被覆盖")
+    }
+
+    func testSaveUnderTheLockPreservesAForeignlyRecordedHash() throws {
+        // The reverse direction of the lost-update pair: a foreign process records the last-written
+        // hash under the lock, and a local save that was waiting must re-read and carry that hash
+        // forward instead of resetting it to the value it knew before blocking.
+        let workspace = Workspace(rootDirectory: rootDirectory)
+        let model = try workspace.open(systemHosts: { "127.0.0.1 localhost" })
+
+        let foreign = try acquireForeignManifestLock()
+        defer { close(foreign) }
+        let manifestURL = rootDirectory.appendingPathComponent("manifest.json")
+        var foreignManifest = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL)) as? [String: Any]
+        )
+
+        let finished = CompletionFlag()
+        Thread.detachNewThread {
+            do {
+                try workspace.save(model)
+            } catch {
+                XCTFail("save 失败：\(error)")
+            }
+            finished.set()
+        }
+        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertFalse(finished.isSet, "外部进程持锁期间 save 不应完成")
+
+        foreignManifest["lastWrittenHash"] = "foreign-hash"
+        try JSONSerialization.data(withJSONObject: foreignManifest).write(to: manifestURL, options: .atomic)
+        XCTAssertEqual(flock(foreign, LOCK_UN), 0)
+
+        XCTAssertTrue(finished.wait(timeout: 5), "外部锁释放后 save 应完成")
+        XCTAssertEqual(try workspace.lastWrittenHash(), "foreign-hash", "外部在锁内回写的哈希不得被 save 重置")
+    }
+
+    func testALeftoverLockFileFromACrashDoesNotBlockAnything() throws {
+        // flock-style kernel locks die with their holder, so a crash leaves only the lock file
+        // itself behind; an unheld leftover is neither a deadlock nor residual content — first
+        // capture proceeds as usual.
+        try FileManager.default.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
+        try Data().write(to: rootDirectory.appendingPathComponent("manifest.lock"))
+
+        let workspace = Workspace(rootDirectory: rootDirectory)
+        var model = try workspace.open(systemHosts: { "127.0.0.1 localhost" })
+        try model.addProfile(id: .init("blocker"), name: "Blocker", content: "# blocker")
+        try workspace.save(model)
+        try workspace.recordLastWrittenHash("a249a12a2f3b5dd513ea921e2b02fa1f")
+
+        XCTAssertEqual(try workspace.lastWrittenHash(), "a249a12a2f3b5dd513ea921e2b02fa1f")
+    }
+
+    /// Holds the kernel-exclusive flock on manifest.lock through an independently opened descriptor,
+    /// simulating another process's holder: flock ownership follows the open file description, so an
+    /// independent descriptor contends with Workspace's own exactly like a real foreign process would —
+    /// an equivalent of a child-process test.
+    private func acquireForeignManifestLock() throws -> Int32 {
+        let path = rootDirectory.appendingPathComponent("manifest.lock").path
+        let fd = Darwin.open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0o644)
+        let locked = try XCTUnwrap(fd >= 0 ? fd : nil, "打开 manifest.lock 失败")
+        XCTAssertEqual(flock(locked, LOCK_EX), 0)
+        return locked
+    }
+
     private func reopenWithoutImporting(_ workspace: Workspace) throws -> ActivationModel {
         try workspace.open(systemHosts: {
             XCTFail("已初始化的工作区不应再读取系统 hosts")
@@ -421,5 +548,24 @@ final class WorkspaceTests: XCTestCase {
         FileManager.default.fileExists(
             atPath: rootDirectory.appendingPathComponent(relativePath).path
         )
+    }
+}
+
+/// Cross-thread completion marker: a background thread sets it, the test thread polls it — used to
+/// assert "not finished while the lock is held, finished after release".
+private final class CompletionFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var flag = false
+
+    var isSet: Bool { lock.withLock { flag } }
+    func set() { lock.withLock { flag = true } }
+
+    func wait(timeout: TimeInterval) -> Bool {
+        let deadline = Date(timeIntervalSinceNow: timeout)
+        while !isSet {
+            guard Date() < deadline else { return false }
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+        return true
     }
 }

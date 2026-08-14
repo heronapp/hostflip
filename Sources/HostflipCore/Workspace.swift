@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// hostflip's persistent workspace (defaults to `~/Library/Application Support/hostflip/`).
@@ -7,6 +8,7 @@ import Foundation
 /// - `base.hosts`: Base Hosts content, updatable in a controlled way by the drift reconciliation flow
 /// - `profiles/*.hosts`: each profile's content; file name = profile name (sanitized + conflict suffix)
 /// - `manifest.json`: group structure, active state, ordering
+/// - `manifest.lock`: dedicated cross-process lock file for manifest read-modify-write (ADR-0010 ①)
 public enum WorkspaceError: Error, Equatable, Sendable {
     /// The workspace has residual content (base.hosts or profile files) but no manifest;
     /// it must not be overwritten as a first-run capture and needs manual intervention.
@@ -297,10 +299,34 @@ public struct Workspace: Sendable {
     /// overwrite the other side's freshly written manifest with stale values (#20 re-review).
     private static let manifestLocks = ManifestLockRegistry()
 
-    private func withManifestLock<T>(_ body: () throws -> T) rethrows -> T {
+    private func withManifestLock<T>(_ body: () throws -> T) throws -> T {
         let lock = Self.manifestLocks.lock(forPath: rootDirectory.standardizedFileURL.path)
         lock.lock()
         defer { lock.unlock() }
+        return try withCrossProcessManifestLock(body)
+    }
+
+    /// Serializes manifest read-modify-write across processes (CLI and resident GUI as peer writers,
+    /// ADR-0010 ①) with an exclusive flock. The lock lives on a dedicated lock file, never on
+    /// manifest.json itself: the manifest is atomically replaced, and rename would leave the lock
+    /// attached to a file no other process opens anymore. The in-process NSLock stays in front, so the
+    /// kernel lock only ever mediates between processes and existing in-process semantics are unchanged.
+    /// flock is released by the kernel when its holder exits, so a crash cannot leave a stale deadlock;
+    /// the leftover lock file itself is inert.
+    private func withCrossProcessManifestLock<T>(_ body: () throws -> T) throws -> T {
+        let fd = Darwin.open(manifestLockURL.path, O_RDWR | O_CREAT | O_CLOEXEC, 0o644)
+        guard fd >= 0 else {
+            // The lock file's parent directory is missing, i.e. there is no workspace to lock.
+            if errno == ENOENT { throw WorkspaceError.notInitialized }
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        // Closing the descriptor releases the flock.
+        defer { close(fd) }
+        while flock(fd, LOCK_EX) != 0 {
+            guard errno == EINTR else {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+        }
         return try body()
     }
 
@@ -309,6 +335,7 @@ public struct Workspace: Sendable {
     private var originalBackupURL: URL { rootDirectory.appendingPathComponent("hosts.orig") }
     private var baseHostsURL: URL { rootDirectory.appendingPathComponent("base.hosts") }
     private var manifestURL: URL { rootDirectory.appendingPathComponent("manifest.json") }
+    private var manifestLockURL: URL { rootDirectory.appendingPathComponent("manifest.lock") }
     private var profilesDirectory: URL { rootDirectory.appendingPathComponent("profiles", isDirectory: true) }
 
     private func write(_ content: String, to url: URL) throws {
