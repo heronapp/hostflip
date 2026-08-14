@@ -27,6 +27,7 @@ enum CLI {
           --id <id>      Address a profile by its unique ID
           --file <path>  Read the new content for 'write' from a file instead of stdin
           --json         Machine-readable output: result object on stdout, JSON errors on stderr
+          --version      Print the version and exit
           --help         Show this help
         """
 
@@ -46,14 +47,19 @@ enum CLI {
             if invocation.wantsHelp {
                 return CLIResult(exitCode: .success, standardOutput: usageText + "\n", standardError: "")
             }
-            let payload = try await dispatch(
-                invocation,
-                workspace: Workspace(rootDirectory: workspaceRootDirectory),
-                systemHostsURL: systemHostsURL,
-                makeHostsMerger: makeHostsMerger,
-                postWorkspaceChanged: postWorkspaceChanged,
-                readStandardInput: readStandardInput
-            )
+            let payload: any CommandPayload
+            if invocation.wantsVersion {
+                payload = VersionPayload()
+            } else {
+                payload = try await dispatch(
+                    invocation,
+                    workspace: Workspace(rootDirectory: workspaceRootDirectory),
+                    systemHostsURL: systemHostsURL,
+                    makeHostsMerger: makeHostsMerger,
+                    postWorkspaceChanged: postWorkspaceChanged,
+                    readStandardInput: readStandardInput
+                )
+            }
             let output: String
             if wantsJSON {
                 output = CLIJSON.encode(payload) + "\n"
@@ -77,9 +83,17 @@ enum CLI {
 
     private struct Invocation {
         var wantsHelp = false
+        var wantsVersion = false
         var profileID: String?
         var filePath: String?
         var commandArguments: [String] = []
+    }
+
+    /// The CLI ships in the app bundle at the app's version (ADR-0009), so this is the one
+    /// version constant release.sh already guards against the bundle plist.
+    private struct VersionPayload: CommandPayload {
+        let version = HostflipBuild.version
+        var humanText: String { version }
     }
 
     private static func parse(_ arguments: [String]) throws -> Invocation {
@@ -91,6 +105,8 @@ enum CLI {
                 break // Handled by the argv scan in run.
             case "--help", "-h":
                 invocation.wantsHelp = true
+            case "--version":
+                invocation.wantsVersion = true
             case "--id":
                 guard let value = iterator.next() else {
                     throw CLIError.usage("option '--id' requires a value")

@@ -34,7 +34,7 @@ let package = Package(
         .executableTarget(name: "HostflipCLI", dependencies: ["HostflipCore", "HostflipXPC"]),
         .executableTarget(name: "hostflipd", dependencies: ["HostflipCore", "HostflipXPC"]),
         .testTarget(name: "HostflipCoreTests", dependencies: ["HostflipCore"]),
-        .testTarget(name: "HostflipCLITests", dependencies: ["HostflipCLI", "HostflipCore"]),
+        .testTarget(name: "HostflipCLITests", dependencies: ["HostflipCLI", "HostflipCore", "HostflipXPC"]),
         .testTarget(name: "HostflipXPCTests", dependencies: ["HostflipCore", "HostflipXPC"]),
         .testTarget(name: "HostflipTests", dependencies: ["Hostflip", "HostflipCore", "HostflipXPC"]),
     ]
