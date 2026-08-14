@@ -12,6 +12,9 @@ enum CLI {
           status      Report the pause state, active profiles, and system hosts drift
           list        List the group structure and every profile with its ID
           cat         Print a profile's content exactly as stored
+          create      Create an empty profile: standalone by default, in a group via group/name
+          write       Replace a profile's content from stdin or --file
+          delete      Delete a profile; an active profile leaves the merge first
           activate    Activate a profile and rewrite the system hosts via the daemon
           deactivate  Deactivate a profile and rewrite the system hosts via the daemon
           pause       Rewrite the system hosts with Base Hosts only, keeping active state
@@ -21,9 +24,10 @@ enum CLI {
         name is ambiguous (names are not unique; IDs are — see 'hostflip list').
 
         Options:
-          --id <id>  Address a profile by its unique ID
-          --json     Machine-readable output: result object on stdout, JSON errors on stderr
-          --help     Show this help
+          --id <id>      Address a profile by its unique ID
+          --file <path>  Read the new content for 'write' from a file instead of stdin
+          --json         Machine-readable output: result object on stdout, JSON errors on stderr
+          --help         Show this help
         """
 
     static func run(
@@ -31,7 +35,8 @@ enum CLI {
         workspaceRootDirectory: URL,
         systemHostsURL: URL,
         makeHostsMerger: @Sendable (Workspace) -> any HostsMerging = { DaemonHostsMerger(workspace: $0) },
-        postWorkspaceChanged: @escaping @Sendable (Workspace) -> Void = CLI.postDistributedWorkspaceChange
+        postWorkspaceChanged: @escaping @Sendable (Workspace) -> Void = CLI.postDistributedWorkspaceChange,
+        readStandardInput: @Sendable () throws -> Data = { try FileHandle.standardInput.readToEnd() ?? Data() }
     ) async -> CLIResult {
         // The output mode is decided by scanning the whole argv, not during parsing, so even a
         // usage error earlier in the argument list is rendered in the requested format.
@@ -46,7 +51,8 @@ enum CLI {
                 workspace: Workspace(rootDirectory: workspaceRootDirectory),
                 systemHostsURL: systemHostsURL,
                 makeHostsMerger: makeHostsMerger,
-                postWorkspaceChanged: postWorkspaceChanged
+                postWorkspaceChanged: postWorkspaceChanged,
+                readStandardInput: readStandardInput
             )
             let output: String
             if wantsJSON {
@@ -72,6 +78,7 @@ enum CLI {
     private struct Invocation {
         var wantsHelp = false
         var profileID: String?
+        var filePath: String?
         var commandArguments: [String] = []
     }
 
@@ -89,6 +96,11 @@ enum CLI {
                     throw CLIError.usage("option '--id' requires a value")
                 }
                 invocation.profileID = value
+            case "--file":
+                guard let value = iterator.next() else {
+                    throw CLIError.usage("option '--file' requires a value")
+                }
+                invocation.filePath = value
             case _ where argument.hasPrefix("-"):
                 throw CLIError.usage("unknown option '\(argument)'")
             default:
@@ -105,10 +117,14 @@ enum CLI {
         workspace: Workspace,
         systemHostsURL: URL,
         makeHostsMerger: @Sendable (Workspace) -> any HostsMerging,
-        postWorkspaceChanged: @escaping @Sendable (Workspace) -> Void
+        postWorkspaceChanged: @escaping @Sendable (Workspace) -> Void,
+        readStandardInput: @Sendable () throws -> Data
     ) async throws -> any CommandPayload {
         guard let command = invocation.commandArguments.first else {
             throw CLIError.usage("no command given")
+        }
+        if invocation.filePath != nil, command != "write" {
+            throw CLIError.usage("option '--file' is only valid with 'write'")
         }
         switch command {
         case "status":
@@ -121,6 +137,30 @@ enum CLI {
             return try CatCommand.run(
                 reference: requireProfileReference(in: invocation, command: command),
                 workspace: workspace
+            )
+        case "create":
+            return try CreateCommand.run(
+                target: requireCreateTarget(in: invocation),
+                workspace: workspace,
+                postWorkspaceChanged: postWorkspaceChanged
+            )
+        case "write":
+            return try await WriteCommand.run(
+                reference: requireProfileReference(in: invocation, command: command),
+                filePath: invocation.filePath,
+                readStandardInput: readStandardInput,
+                workspace: workspace,
+                systemHostsURL: systemHostsURL,
+                merger: makeHostsMerger(workspace),
+                postWorkspaceChanged: postWorkspaceChanged
+            )
+        case "delete":
+            return try await DeleteCommand.run(
+                reference: requireProfileReference(in: invocation, command: command),
+                workspace: workspace,
+                systemHostsURL: systemHostsURL,
+                merger: makeHostsMerger(workspace),
+                postWorkspaceChanged: postWorkspaceChanged
             )
         // "on"/"off" are entry aliases only: they always require the profile argument (a bare
         // `off` is a usage error, keeping it unmistakable from `pause`) and never appear in help.
@@ -154,6 +194,23 @@ enum CLI {
         if invocation.profileID != nil {
             throw CLIError.usage("unexpected option '--id'")
         }
+    }
+
+    /// Extracts create's one positional target: a new profile's name, or a group/name path.
+    /// The target names something that does not exist yet, so the --id addressing form has no
+    /// meaning here and is rejected.
+    private static func requireCreateTarget(in invocation: Invocation) throws -> String {
+        if invocation.profileID != nil {
+            throw CLIError.usage("unexpected option '--id'")
+        }
+        let positionals = invocation.commandArguments.dropFirst()
+        if let extra = positionals.dropFirst().first {
+            throw CLIError.usage("unexpected argument '\(extra)'")
+        }
+        guard let target = positionals.first else {
+            throw CLIError.usage("'create' needs a profile name or group/name path")
+        }
+        return target
     }
 
     /// Extracts the one profile reference of a profile-addressed command: exactly one of a

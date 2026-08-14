@@ -56,4 +56,30 @@ public enum HostsSyntax {
         }
         return tokens
     }
+
+    /// Structural validation on the same per-line rules: a hosts entry names an IP address and at
+    /// least one hostname, so a non-comment line with exactly one field cannot be complete. Field
+    /// values stay unvalidated, matching the tokenizer. Returns the 1-based number of the first
+    /// incomplete line; nil when every line is blank, comment-only, or a full entry.
+    public static func firstIncompleteLine(in text: String) -> Int? {
+        let ns = text as NSString
+        var lineNumber = 0
+        var incompleteLine: Int?
+        ns.enumerateSubstrings(
+            in: NSRange(location: 0, length: ns.length),
+            options: [.byLines, .substringNotRequired]
+        ) { _, lineRange, _, stop in
+            lineNumber += 1
+            var codeRange = lineRange
+            let hash = ns.range(of: "#", range: lineRange)
+            if hash.location != NSNotFound {
+                codeRange.length = hash.location - lineRange.location
+            }
+            if fieldPattern.numberOfMatches(in: text, options: [], range: codeRange) == 1 {
+                incompleteLine = lineNumber
+                stop.pointee = true
+            }
+        }
+        return incompleteLine
+    }
 }

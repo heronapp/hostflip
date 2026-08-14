@@ -74,4 +74,37 @@ final class HostsSyntaxTests: XCTestCase {
             token(.hostname, 19, 1),
         ])
     }
+
+    // MARK: - Structural validation
+
+    func testCompleteEntriesCommentsAndBlankLinesAreNotIncomplete() {
+        XCTAssertNil(HostsSyntax.firstIncompleteLine(in: """
+            # blocklist
+            0.0.0.0 ads.example.com tracker.example.com
+
+            1.2.3.4 example.com # staging
+            """))
+    }
+
+    func testEmptyContentIsNotIncomplete() {
+        XCTAssertNil(HostsSyntax.firstIncompleteLine(in: ""))
+    }
+
+    func testALoneFieldLineIsIncomplete() {
+        XCTAssertEqual(HostsSyntax.firstIncompleteLine(in: "127.0.0.1 localhost\n127.0.0.1\n"), 2)
+    }
+
+    func testASingleFieldBeforeAnInlineCommentIsIncomplete() {
+        XCTAssertEqual(HostsSyntax.firstIncompleteLine(in: "127.0.0.1 # hostname to be decided"), 1)
+    }
+
+    func testTheFirstOfSeveralIncompleteLinesIsReported() {
+        XCTAssertEqual(HostsSyntax.firstIncompleteLine(in: "stray\n1.1.1.1 a\nstray again\n"), 1)
+    }
+
+    func testFieldValuesAreNotValidated() {
+        // Value correctness stays out of scope, matching the tokenizer: two fields make a
+        // structurally complete entry regardless of what the fields contain.
+        XCTAssertNil(HostsSyntax.firstIncompleteLine(in: "not-an-ip some-host"))
+    }
 }

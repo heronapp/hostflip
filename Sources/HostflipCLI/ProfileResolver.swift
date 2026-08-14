@@ -51,14 +51,9 @@ enum ProfileResolver {
             matches = entries(in: model).filter { $0.profile.id.rawValue == id }
         case .nameOrPath(let text):
             raw = text
-            // Any slash makes the reference a `group/profile` path, split on the first slash so
-            // member names may contain slashes themselves. A standalone profile or a group whose
-            // own name contains a slash is therefore reachable only through --id.
-            if let slash = text.firstIndex(of: "/") {
-                let groupName = String(text[..<slash])
-                let profileName = String(text[text.index(after: slash)...])
+            if let path = splitPath(text) {
                 matches = entries(in: model).filter {
-                    $0.groupName == groupName && $0.profile.name == profileName
+                    $0.groupName == path.group && $0.profile.name == path.name
                 }
             } else {
                 matches = entries(in: model).filter { $0.profile.name == text }
@@ -77,6 +72,18 @@ enum ProfileResolver {
             })
         }
         return match
+    }
+
+    /// The one path rule, shared with `create`'s target parsing: any slash makes the text a
+    /// `group/profile` path, split on the first slash so member names may contain slashes
+    /// themselves. A standalone profile or a group whose own name contains a slash is
+    /// therefore reachable only through --id. Returns nil for a slashless bare name.
+    static func splitPath(_ text: String) -> (group: String, name: String)? {
+        guard let slash = text.firstIndex(of: "/") else { return nil }
+        return (
+            group: String(text[..<slash]),
+            name: String(text[text.index(after: slash)...])
+        )
     }
 
     /// Every profile in model order — standalone first, then each group's members.
