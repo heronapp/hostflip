@@ -3,8 +3,8 @@ import HostflipXPC
 import os
 
 // Entry point of the hostflip privileged daemon: publishes the Mach service and only accepts connections
-// from a hostflip app signed with the same Team ID. All business logic lives in HostflipXPC.DaemonService
-// (unit-testable); this file is only launchd/XPC glue.
+// from a hostflip app or CLI signed with the same Team ID (ADR 0009). All business logic lives in
+// HostflipXPC.DaemonService (unit-testable); this file is only launchd/XPC glue.
 
 /// Sets the code signing requirement before accepting a new connection; peers that fail it are rejected by the XPC runtime.
 final class ListenerDelegate: NSObject, NSXPCListenerDelegate, @unchecked Sendable {
@@ -39,7 +39,7 @@ func fail(_ message: String, code: Int32) -> Never {
 
 // If we are unsigned ourselves we cannot verify peers, so fail closed (EX_CONFIG; launchd will not restart endlessly).
 guard let peerRequirement = try? SigningIdentity.peerRequirement(
-    identifier: ChannelIdentity.appBundleID
+    identifiers: [ChannelIdentity.appBundleID, ChannelIdentity.cliIdentifier]
 ) else {
     fail("Refusing to start: unsigned build or signing identity lacks a valid Team ID. See docs/signed-build-verification.md", code: 78)
 }

@@ -43,7 +43,7 @@ public actor DaemonClient {
     private func activeConnection() throws -> NSXPCConnection {
         if let connection { return connection }
         let requirement = try SigningIdentity.peerRequirement(
-            identifier: ChannelIdentity.daemonIdentifier
+            identifiers: [ChannelIdentity.daemonIdentifier]
         )
         let connection = NSXPCConnection(
             machServiceName: ChannelIdentity.daemonIdentifier,

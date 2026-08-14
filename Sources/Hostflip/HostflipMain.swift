@@ -15,7 +15,7 @@ enum HostflipMain {
         case "--print-requirement":
             do {
                 // The requirement the app enforces when connecting to the daemon (same Team ID + daemon identifier)
-                print(try SigningIdentity.peerRequirement(identifier: ChannelIdentity.daemonIdentifier))
+                print(try SigningIdentity.peerRequirement(identifiers: [ChannelIdentity.daemonIdentifier]))
             } catch {
                 fail("Cannot construct peer requirement: \(error)")
             }
