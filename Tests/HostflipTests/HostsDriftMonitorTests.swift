@@ -176,6 +176,38 @@ final class HostsDriftMonitorTests: XCTestCase {
         monitor.stop()
     }
 
+    func testAnExternalWriteWhoseRecordLandsWithinTheConfirmationWindowNeverReportsDrift() async throws {
+        let initialCheck = expectation(description: "no drift on the initial check")
+        let refreshed = expectation(description: "the settled external write reports as a drift-free refresh")
+        let unexpectedDrift = expectation(description: "a write whose record lands within the window must not flash drift")
+        unexpectedDrift.isInverted = true
+        let nonDriftCounter = DriftCallbackCounter()
+        let monitor = HostsDriftMonitor(workspace: workspace, hostsURL: hostsURL)
+        monitor.start { hasDrift in
+            if hasDrift {
+                unexpectedDrift.fulfill()
+            } else if nonDriftCounter.next() == 1 {
+                initialCheck.fulfill()
+            } else {
+                refreshed.fulfill()
+            }
+        }
+        await fulfillment(of: [initialCheck], timeout: 1)
+
+        // The external write is noticed while the manifest is still stale (the recheck stands in
+        // for the file event, whose delivery moment is uncontrollable)...
+        let written = MergedHosts(content: "10.0.0.1 cli-written.local\n")
+        try Data(written.content.utf8).write(to: hostsURL, options: .atomic)
+        monitor.recheck()
+        // ...but the record and its change notification land within the confirmation window, so
+        // the deferred verdict dissolves instead of flashing a drift banner.
+        try workspace.recordLastWrittenHash(written.hash)
+        monitor.recheck()
+
+        await fulfillment(of: [refreshed, unexpectedDrift], timeout: 1)
+        monitor.stop()
+    }
+
     func testExpectedWriteWindowNeverHidesPreexistingDrift() async throws {
         let target = MergedHosts(content: "10.0.0.1 managed.local\n")
         try Data(target.content.utf8).write(to: hostsURL, options: .atomic)

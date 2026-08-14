@@ -22,11 +22,19 @@ final class HostsDriftMonitor:
     @unchecked Sendable {
     private let workspace: Workspace
     private let hostsURL: URL
+    /// A newly detected drift verdict waits out this confirmation window before it is reported:
+    /// an external writer's hosts write is visible before that writer records the new baseline
+    /// into the manifest (write first, record only after the daemon confirms), so a fresh
+    /// mismatch may be that gap rather than tampering. Only the report is deferred, never the
+    /// clearing — genuine drift still reports, just this much later, and a settled external
+    /// write dissolves instead of flashing the drift banner.
+    private let newDriftConfirmationDelay: DispatchTimeInterval
     private let queue = DispatchQueue(label: "com.heronapp.hostflip.hosts-drift-monitor")
 
     private var source: DispatchSourceFileSystemObject?
     private var isStarted = false
     private var retryScheduled = false
+    private var driftConfirmationScheduled = false
     private var pendingTargetWriteHashes: [String: Int] = [:]
     /// The latest target hash the daemon has confirmed but the manifest may not yet have successfully recorded.
     private var confirmedTargetHash: String?
@@ -36,10 +44,12 @@ final class HostsDriftMonitor:
 
     init(
         workspace: Workspace,
-        hostsURL: URL = URL(fileURLWithPath: "/etc/hosts")
+        hostsURL: URL = URL(fileURLWithPath: "/etc/hosts"),
+        newDriftConfirmationDelay: DispatchTimeInterval = .milliseconds(250)
     ) {
         self.workspace = workspace
         self.hostsURL = hostsURL
+        self.newDriftConfirmationDelay = newDriftConfirmationDelay
     }
 
     /// Idempotent start: arms the watcher first and then checks immediately, so no modification slips between the initial check and the watch.
@@ -183,7 +193,7 @@ final class HostsDriftMonitor:
         }
     }
 
-    private func checkNow() {
+    private func checkNow(deferringNewDrift: Bool = true) {
         let actualHash = (try? Data(contentsOf: hostsURL)).map(MergedHosts.hash(of:))
         let persistedHash = try? workspace.expectedSystemHostsHash()
         let expectedHash = confirmedTargetHash ?? persistedHash
@@ -197,6 +207,14 @@ final class HostsDriftMonitor:
             hasDrift = true
         }
 
+        // A drift verdict that would newly show the banner first waits out the confirmation
+        // window; the deferred re-evaluation reads fresh state, so a baseline that has caught
+        // up by then dissolves the verdict unreported. Nothing is recorded as reported here.
+        if deferringNewDrift, hasDrift, lastReportedDrift != true {
+            scheduleDriftConfirmation()
+            return
+        }
+
         // Drift-free self-writes also need a notification so the read-only System Hosts page can update in real time.
         let shouldReport = hasDrift != lastReportedDrift
             || actualHash != lastReportedActualHash
@@ -206,6 +224,16 @@ final class HostsDriftMonitor:
         guard let onChange else { return }
         Task { @MainActor in
             onChange(hasDrift)
+        }
+    }
+
+    private func scheduleDriftConfirmation() {
+        guard !driftConfirmationScheduled else { return }
+        driftConfirmationScheduled = true
+        queue.asyncAfter(deadline: .now() + newDriftConfirmationDelay) { [self] in
+            driftConfirmationScheduled = false
+            guard isStarted else { return }
+            checkNow(deferringNewDrift: false)
         }
     }
 }
