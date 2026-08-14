@@ -19,7 +19,7 @@ swift build -c release
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Library/LaunchDaemons" \
     "$APP/Contents/Frameworks"
-cp "$BIN/Hostflip" "$APP/Contents/MacOS/Hostflip"
+cp "$BIN/HostflipApp" "$APP/Contents/MacOS/Hostflip"
 cp "$BIN/hostflipd" "$APP/Contents/MacOS/hostflipd"
 cp Packaging/HostflipApp-Info.plist "$APP/Contents/Info.plist"
 cp Packaging/Hostflip.icns "$APP/Contents/Resources/Hostflip.icns"

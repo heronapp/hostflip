@@ -40,6 +40,16 @@ public struct Workspace: Sendable {
         return try captureSystemHosts(systemHosts)
     }
 
+    /// Opens the workspace without side effects: loads an initialized workspace, or throws
+    /// `notInitialized` instead of capturing the system hosts. Read-only clients (the CLI)
+    /// must never turn a missing workspace into a first capture.
+    public func openReadOnly() throws -> ActivationModel {
+        guard FileManager.default.fileExists(atPath: manifestURL.path) else {
+            throw WorkspaceError.notInitialized
+        }
+        return try load()
+    }
+
     /// hosts.orig alone is treated as an interrupted first capture and safe to capture again;
     /// base.hosts or profile files, however, are unreproducible user content.
     private var hasResidualContent: Bool {

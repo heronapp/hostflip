@@ -381,6 +381,28 @@ final class WorkspaceTests: XCTestCase {
         XCTAssertFalse(workspaceFileExists("manifest.json"))
     }
 
+    func testOpenReadOnlyLoadsAnInitializedWorkspace() throws {
+        let workspace = Workspace(rootDirectory: rootDirectory)
+        var model = try workspace.open(systemHosts: { "127.0.0.1 localhost" })
+        try model.addProfile(id: .init("dev"), name: "Dev", content: "# dev")
+        try workspace.save(model)
+
+        let reloaded = try workspace.openReadOnly()
+
+        XCTAssertEqual(reloaded.baseHosts.content, "127.0.0.1 localhost")
+        XCTAssertEqual(reloaded.standaloneProfiles.map(\.name), ["Dev"])
+    }
+
+    func testOpenReadOnlyOnAnUninitializedWorkspaceThrowsWithoutCapturing() throws {
+        let workspace = Workspace(rootDirectory: rootDirectory)
+
+        XCTAssertThrowsError(try workspace.openReadOnly()) { error in
+            XCTAssertEqual(error as? WorkspaceError, .notInitialized)
+        }
+        XCTAssertFalse(workspaceFileExists("manifest.json"))
+        XCTAssertFalse(workspaceFileExists("hosts.orig"))
+    }
+
     private func reopenWithoutImporting(_ workspace: Workspace) throws -> ActivationModel {
         try workspace.open(systemHosts: {
             XCTFail("已初始化的工作区不应再读取系统 hosts")
