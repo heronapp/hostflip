@@ -1,5 +1,6 @@
 import Foundation
 import HostflipCore
+import HostflipXPC
 
 /// Parses one invocation and dispatches to the command implementations. Help and documentation
 /// show canonical verbs only; any future aliases stay out of both.
@@ -8,9 +9,13 @@ enum CLI {
         Usage: hostflip [--json] <command> [<profile>]
 
         Commands:
-          status  Report the pause state, active profiles, and system hosts drift
-          list    List the group structure and every profile with its ID
-          cat     Print a profile's content exactly as stored
+          status      Report the pause state, active profiles, and system hosts drift
+          list        List the group structure and every profile with its ID
+          cat         Print a profile's content exactly as stored
+          activate    Activate a profile and rewrite the system hosts via the daemon
+          deactivate  Deactivate a profile and rewrite the system hosts via the daemon
+          pause       Rewrite the system hosts with Base Hosts only, keeping active state
+          resume      Rewrite the system hosts with the kept active profiles restored
 
         Profiles are addressed by name, by group/profile path, or by --id when the
         name is ambiguous (names are not unique; IDs are — see 'hostflip list').
@@ -24,8 +29,10 @@ enum CLI {
     static func run(
         arguments: [String],
         workspaceRootDirectory: URL,
-        systemHostsURL: URL
-    ) -> CLIResult {
+        systemHostsURL: URL,
+        makeHostsMerger: @Sendable (Workspace) -> any HostsMerging = { DaemonHostsMerger(workspace: $0) },
+        postWorkspaceChanged: @escaping @Sendable (Workspace) -> Void = CLI.postDistributedWorkspaceChange
+    ) async -> CLIResult {
         // The output mode is decided by scanning the whole argv, not during parsing, so even a
         // usage error earlier in the argument list is rendered in the requested format.
         let wantsJSON = arguments.contains("--json")
@@ -34,10 +41,12 @@ enum CLI {
             if invocation.wantsHelp {
                 return CLIResult(exitCode: .success, standardOutput: usageText + "\n", standardError: "")
             }
-            let payload = try dispatch(
+            let payload = try await dispatch(
                 invocation,
                 workspace: Workspace(rootDirectory: workspaceRootDirectory),
-                systemHostsURL: systemHostsURL
+                systemHostsURL: systemHostsURL,
+                makeHostsMerger: makeHostsMerger,
+                postWorkspaceChanged: postWorkspaceChanged
             )
             let output: String
             if wantsJSON {
@@ -94,8 +103,10 @@ enum CLI {
     private static func dispatch(
         _ invocation: Invocation,
         workspace: Workspace,
-        systemHostsURL: URL
-    ) throws -> any CommandPayload {
+        systemHostsURL: URL,
+        makeHostsMerger: @Sendable (Workspace) -> any HostsMerging,
+        postWorkspaceChanged: @escaping @Sendable (Workspace) -> Void
+    ) async throws -> any CommandPayload {
         guard let command = invocation.commandArguments.first else {
             throw CLIError.usage("no command given")
         }
@@ -110,6 +121,26 @@ enum CLI {
             return try CatCommand.run(
                 reference: requireProfileReference(in: invocation, command: command),
                 workspace: workspace
+            )
+        // "on"/"off" are entry aliases only: they always require the profile argument (a bare
+        // `off` is a usage error, keeping it unmistakable from `pause`) and never appear in help.
+        case "activate", "on", "deactivate", "off":
+            return try await SwitchCommand.setActive(
+                command == "activate" || command == "on",
+                reference: requireProfileReference(in: invocation, command: command),
+                workspace: workspace,
+                systemHostsURL: systemHostsURL,
+                merger: makeHostsMerger(workspace),
+                postWorkspaceChanged: postWorkspaceChanged
+            )
+        case "pause", "resume":
+            try requireNoArguments(in: invocation)
+            return try await SwitchCommand.setPaused(
+                command == "pause",
+                workspace: workspace,
+                systemHostsURL: systemHostsURL,
+                merger: makeHostsMerger(workspace),
+                postWorkspaceChanged: postWorkspaceChanged
             )
         default:
             throw CLIError.usage("unknown command '\(command)'")
@@ -147,6 +178,19 @@ enum CLI {
         }
     }
 
+    // MARK: - Cross-process change notification (ADR-0010 ③)
+
+    /// Tells a running GUI that this process changed the workspace on disk. Display-refresh
+    /// optimization only: delivery is not guaranteed and correctness never depends on it.
+    static func postDistributedWorkspaceChange(for workspace: Workspace) {
+        DistributedNotificationCenter.default().postNotificationName(
+            Workspace.changeNotification,
+            object: workspace.changeNotificationObject,
+            userInfo: nil,
+            deliverImmediately: true
+        )
+    }
+
     // MARK: - Error rendering
 
     private static func normalize(_ error: any Error) -> CLIError {
@@ -172,8 +216,68 @@ enum CLI {
                 message: "workspace not initialized; launch the Hostflip app once to capture the system hosts",
                 exitCode: .failure
             )
+        case let error as DaemonChannelError:
+            return normalize(error)
         default:
             return CLIError(code: "internal-error", message: error.localizedDescription, exitCode: .failure)
+        }
+    }
+
+    /// Maps a daemon channel failure onto the exit-code contract: drift means "stop and hand
+    /// back to a human" (3), an unreachable or restarting daemon is "not ready" (4), everything
+    /// else is a general failure with a string code integrations can key on.
+    private static func normalize(_ error: DaemonChannelError) -> CLIError {
+        switch error {
+        case .mergeRejected(.hostsDrift):
+            return .hostsDrift
+        case .unavailable:
+            return CLIError(
+                code: "daemon-unavailable",
+                message: "the privileged daemon is not available; launch the Hostflip app and perform a switch once to install and approve it",
+                exitCode: .daemonUnavailable
+            )
+        case .interrupted:
+            return CLIError(
+                code: "daemon-unavailable",
+                message: "the privileged daemon was interrupted twice in a row; try again, or relaunch the Hostflip app",
+                exitCode: .daemonUnavailable
+            )
+        case .peerRejected:
+            return CLIError(
+                code: "daemon-unavailable",
+                message: "the daemon's code signature was rejected; reinstall the Hostflip app",
+                exitCode: .daemonUnavailable
+            )
+        case .selfSigningUnavailable:
+            return CLIError(
+                code: "unsigned-build",
+                message: "this hostflip binary is unsigned, so it cannot connect to the daemon; use a signed build",
+                exitCode: .failure
+            )
+        case .protocolViolation, .mergeRejected(.versionMismatch):
+            return CLIError(
+                code: "version-mismatch",
+                message: "the daemon and this hostflip binary are from different versions; finish the upgrade by relaunching the Hostflip app",
+                exitCode: .failure
+            )
+        case .mergeRejected(let reason):
+            return CLIError(
+                code: "merge-rejected",
+                message: "the daemon rejected the merge: \(reason)",
+                exitCode: .failure
+            )
+        case .mergeWriteFailed(let failure):
+            return CLIError(
+                code: "hosts-write-failed",
+                message: "the daemon could not write the system hosts (stage \(failure.stage.rawValue)): \(failure.message)",
+                exitCode: .failure
+            )
+        case .transport(let domain, let code):
+            return CLIError(
+                code: "transport-error",
+                message: "the daemon channel failed (\(domain) \(code)); try again",
+                exitCode: .failure
+            )
         }
     }
 

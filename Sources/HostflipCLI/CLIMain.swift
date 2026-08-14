@@ -5,8 +5,8 @@ import HostflipCore
 /// command and its output contract stay testable through CLI.run.
 @main
 enum CLIMain {
-    static func main() {
-        let result = CLI.run(
+    static func main() async {
+        let result = await CLI.run(
             arguments: Array(CommandLine.arguments.dropFirst()),
             workspaceRootDirectory: Workspace.defaultRootDirectory,
             systemHostsURL: URL(fileURLWithPath: "/etc/hosts")

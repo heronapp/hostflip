@@ -30,6 +30,15 @@ struct CLIError: Error {
     static func usage(_ message: String) -> CLIError {
         CLIError(code: "usage", message: message, exitCode: .usage)
     }
+
+    /// The one drift error, shared by the local pre-check and the daemon's rejection so both
+    /// render identically. The CLI only reports drift, it never reconciles (exit code 3 is the
+    /// documented "stop and hand back to a human" signal).
+    static let hostsDrift = CLIError(
+        code: "hosts-drift",
+        message: "the system hosts changed outside hostflip; review and reconcile in the Hostflip app",
+        exitCode: .drift
+    )
 }
 
 /// What one invocation produced. Commands return their streams instead of printing so tests can

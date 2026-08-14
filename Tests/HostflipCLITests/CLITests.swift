@@ -22,10 +22,10 @@ final class CLITests: XCTestCase {
 
     // MARK: - status
 
-    func testStatusReportsRunningActiveProfilesAndNoDrift() throws {
+    func testStatusReportsRunningActiveProfilesAndNoDrift() async throws {
         try makeInitializedWorkspace()
 
-        let result = invoke("status")
+        let result = await invoke("status")
 
         XCTAssertEqual(result.exitCode, .success)
         XCTAssertEqual(result.standardError, "")
@@ -37,10 +37,10 @@ final class CLITests: XCTestCase {
             """)
     }
 
-    func testStatusJSONWritesTheResultObjectToStandardOutput() throws {
+    func testStatusJSONWritesTheResultObjectToStandardOutput() async throws {
         try makeInitializedWorkspace()
 
-        let result = invoke("--json", "status")
+        let result = await invoke("--json", "status")
 
         XCTAssertEqual(result.exitCode, .success)
         XCTAssertEqual(result.standardError, "")
@@ -54,42 +54,42 @@ final class CLITests: XCTestCase {
         XCTAssertEqual(active.first?["group"] as? String, "Work")
     }
 
-    func testStatusReportsPausedWhilePreservingActiveProfiles() throws {
+    func testStatusReportsPausedWhilePreservingActiveProfiles() async throws {
         try makeInitializedWorkspace(paused: true)
 
-        let result = invoke("status")
+        let result = await invoke("status")
 
         XCTAssertEqual(result.exitCode, .success)
         XCTAssertTrue(result.standardOutput.hasPrefix("Status: paused\nActive: Work/Dev\n"))
     }
 
-    func testStatusReportsDriftWhenTheSystemHostsDiverges() throws {
+    func testStatusReportsDriftWhenTheSystemHostsDiverges() async throws {
         try makeInitializedWorkspace()
         try Data("tampered\n".utf8).write(to: systemHostsURL)
 
-        let result = invoke("--json", "status")
+        let result = await invoke("--json", "status")
 
         // status only reports drift; exit code 3 is reserved for write commands refusing to proceed.
         XCTAssertEqual(result.exitCode, .success)
         XCTAssertEqual(try jsonObject(result.standardOutput)["drift"] as? Bool, true)
     }
 
-    func testStatusDriftLineNamesTheDriftInHumanOutput() throws {
+    func testStatusDriftLineNamesTheDriftInHumanOutput() async throws {
         try makeInitializedWorkspace()
         try Data("tampered\n".utf8).write(to: systemHostsURL)
 
-        let result = invoke("status")
+        let result = await invoke("status")
 
         XCTAssertTrue(result.standardOutput.contains("Drift:  detected"))
     }
 
-    func testStatusDriftBaselineFollowsTheLastConfirmedMergeWrite() throws {
+    func testStatusDriftBaselineFollowsTheLastConfirmedMergeWrite() async throws {
         let workspace = try makeInitializedWorkspace()
         let merged = "merged output\n"
         try workspace.recordLastWrittenHash(MergedHosts(content: merged).hash)
         try Data(merged.utf8).write(to: systemHostsURL)
 
-        let result = invoke("--json", "status")
+        let result = await invoke("--json", "status")
 
         // The system hosts no longer matches first capture, but it matches the recorded merge
         // write: no drift — the same baseline the app's drift monitor compares against.
@@ -98,10 +98,10 @@ final class CLITests: XCTestCase {
 
     // MARK: - list
 
-    func testListShowsTheGroupStructureWithIDs() throws {
+    func testListShowsTheGroupStructureWithIDs() async throws {
         try makeInitializedWorkspace()
 
-        let result = invoke("list")
+        let result = await invoke("list")
 
         XCTAssertEqual(result.exitCode, .success)
         XCTAssertEqual(result.standardError, "")
@@ -114,10 +114,10 @@ final class CLITests: XCTestCase {
             """)
     }
 
-    func testListJSONContainsStandaloneProfilesAndGroups() throws {
+    func testListJSONContainsStandaloneProfilesAndGroups() async throws {
         try makeInitializedWorkspace()
 
-        let result = invoke("--json", "list")
+        let result = await invoke("--json", "list")
 
         XCTAssertEqual(result.exitCode, .success)
         let object = try jsonObject(result.standardOutput)
@@ -131,7 +131,7 @@ final class CLITests: XCTestCase {
         XCTAssertEqual(members.map { $0["id"] as? String }, ["dev-id", "staging-id"])
     }
 
-    func testListPadsNonBMPNamesWithoutTruncatingTheIDColumn() throws {
+    func testListPadsNonBMPNamesWithoutTruncatingTheIDColumn() async throws {
         let workspace = Workspace(rootDirectory: workspaceRootDirectory)
         _ = try workspace.open(systemHosts: { capturedHosts })
         let model = try ActivationModel(
@@ -144,7 +144,7 @@ final class CLITests: XCTestCase {
         )
         try workspace.save(model)
 
-        let result = invoke("list")
+        let result = await invoke("list")
 
         // A name whose UTF-16 length exceeds the column width must still be printed whole,
         // with its ID intact after the padding.
@@ -155,11 +155,11 @@ final class CLITests: XCTestCase {
             """)
     }
 
-    func testListWithNoProfilesPrintsAPlaceholder() throws {
+    func testListWithNoProfilesPrintsAPlaceholder() async throws {
         let workspace = Workspace(rootDirectory: workspaceRootDirectory)
         _ = try workspace.open(systemHosts: { capturedHosts })
 
-        let result = invoke("list")
+        let result = await invoke("list")
 
         XCTAssertEqual(result.exitCode, .success)
         XCTAssertEqual(result.standardOutput, "No profiles.\n")
@@ -167,10 +167,10 @@ final class CLITests: XCTestCase {
 
     // MARK: - cat
 
-    func testCatByNamePrintsTheProfileContentVerbatim() throws {
+    func testCatByNamePrintsTheProfileContentVerbatim() async throws {
         try makeInitializedWorkspace()
 
-        let result = invoke("cat", "Dev")
+        let result = await invoke("cat", "Dev")
 
         XCTAssertEqual(result.exitCode, .success)
         XCTAssertEqual(result.standardError, "")
@@ -178,7 +178,7 @@ final class CLITests: XCTestCase {
         XCTAssertEqual(result.standardOutput, "# dev")
     }
 
-    func testCatPreservesATrailingNewlineExactly() throws {
+    func testCatPreservesATrailingNewlineExactly() async throws {
         let workspace = Workspace(rootDirectory: workspaceRootDirectory)
         _ = try workspace.open(systemHosts: { capturedHosts })
         let content = "127.0.0.1 dev.local\n"
@@ -189,33 +189,33 @@ final class CLITests: XCTestCase {
         )
         try workspace.save(model)
 
-        let result = invoke("cat", "Dev")
+        let result = await invoke("cat", "Dev")
 
         XCTAssertEqual(result.standardOutput, content)
     }
 
-    func testCatByPathPrintsTheNamedGroupMember() throws {
+    func testCatByPathPrintsTheNamedGroupMember() async throws {
         try makeInitializedWorkspace()
 
-        let result = invoke("cat", "Work/Staging")
+        let result = await invoke("cat", "Work/Staging")
 
         XCTAssertEqual(result.exitCode, .success)
         XCTAssertEqual(result.standardOutput, "# staging")
     }
 
-    func testCatByIDPrintsTheProfile() throws {
+    func testCatByIDPrintsTheProfile() async throws {
         try makeInitializedWorkspace()
 
-        let result = invoke("cat", "--id", "solo-id")
+        let result = await invoke("cat", "--id", "solo-id")
 
         XCTAssertEqual(result.exitCode, .success)
         XCTAssertEqual(result.standardOutput, "# solo")
     }
 
-    func testCatJSONReportsTheResolvedProfileWithItsContent() throws {
+    func testCatJSONReportsTheResolvedProfileWithItsContent() async throws {
         try makeInitializedWorkspace()
 
-        let result = invoke("--json", "cat", "Dev")
+        let result = await invoke("--json", "cat", "Dev")
 
         XCTAssertEqual(result.exitCode, .success)
         let object = try jsonObject(result.standardOutput)
@@ -225,20 +225,20 @@ final class CLITests: XCTestCase {
         XCTAssertEqual(object["content"] as? String, "# dev")
     }
 
-    func testCatUnknownReferenceFailsWithNotFoundExitCode() throws {
+    func testCatUnknownReferenceFailsWithNotFoundExitCode() async throws {
         try makeInitializedWorkspace()
 
-        let result = invoke("cat", "Missing")
+        let result = await invoke("cat", "Missing")
 
         XCTAssertEqual(result.exitCode, .notFound)
         XCTAssertEqual(result.standardOutput, "")
         XCTAssertTrue(result.standardError.contains("no profile matches 'Missing'"))
     }
 
-    func testCatUnknownReferenceJSONErrorCarriesTheNotFoundCodeWithoutCandidates() throws {
+    func testCatUnknownReferenceJSONErrorCarriesTheNotFoundCodeWithoutCandidates() async throws {
         try makeInitializedWorkspace()
 
-        let result = invoke("--json", "cat", "--id", "missing-id")
+        let result = await invoke("--json", "cat", "--id", "missing-id")
 
         XCTAssertEqual(result.exitCode, .notFound)
         let details = try XCTUnwrap(try jsonObject(result.standardError)["error"] as? [String: Any])
@@ -246,10 +246,10 @@ final class CLITests: XCTestCase {
         XCTAssertNil(details["candidates"])
     }
 
-    func testCatAmbiguousReferenceListsEveryCandidateWithItsID() throws {
+    func testCatAmbiguousReferenceListsEveryCandidateWithItsID() async throws {
         try makeAmbiguousWorkspace()
 
-        let result = invoke("cat", "Dev")
+        let result = await invoke("cat", "Dev")
 
         XCTAssertEqual(result.exitCode, .ambiguous)
         XCTAssertEqual(result.standardOutput, "")
@@ -262,10 +262,10 @@ final class CLITests: XCTestCase {
             """)
     }
 
-    func testCatAmbiguousReferenceJSONErrorCarriesTheCandidates() throws {
+    func testCatAmbiguousReferenceJSONErrorCarriesTheCandidates() async throws {
         try makeAmbiguousWorkspace()
 
-        let result = invoke("--json", "cat", "Dev")
+        let result = await invoke("--json", "cat", "Dev")
 
         XCTAssertEqual(result.exitCode, .ambiguous)
         let details = try XCTUnwrap(try jsonObject(result.standardError)["error"] as? [String: Any])
@@ -278,16 +278,16 @@ final class CLITests: XCTestCase {
 
     // MARK: - Errors and exit codes
 
-    func testUninitializedWorkspaceFailsWithGeneralErrorExitCode() throws {
-        let result = invoke("status")
+    func testUninitializedWorkspaceFailsWithGeneralErrorExitCode() async throws {
+        let result = await invoke("status")
 
         XCTAssertEqual(result.exitCode, .failure)
         XCTAssertEqual(result.standardOutput, "")
         XCTAssertTrue(result.standardError.contains("not initialized"))
     }
 
-    func testUninitializedWorkspaceJSONErrorCarriesTheStringCode() throws {
-        let result = invoke("--json", "list")
+    func testUninitializedWorkspaceJSONErrorCarriesTheStringCode() async throws {
+        let result = await invoke("--json", "list")
 
         XCTAssertEqual(result.exitCode, .failure)
         XCTAssertEqual(result.standardOutput, "", "results belong to stdout, errors to stderr")
@@ -297,82 +297,82 @@ final class CLITests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(details["message"] as? String).isEmpty)
     }
 
-    func testUnknownCommandFailsWithUsageExitCode() throws {
-        let result = invoke("frobnicate")
+    func testUnknownCommandFailsWithUsageExitCode() async throws {
+        let result = await invoke("frobnicate")
 
         XCTAssertEqual(result.exitCode, .usage)
         XCTAssertTrue(result.standardError.contains("unknown command 'frobnicate'"))
     }
 
-    func testUnknownCommandJSONErrorUsesTheUsageCode() throws {
-        let result = invoke("--json", "frobnicate")
+    func testUnknownCommandJSONErrorUsesTheUsageCode() async throws {
+        let result = await invoke("--json", "frobnicate")
 
         XCTAssertEqual(result.exitCode, .usage)
         let details = try XCTUnwrap(try jsonObject(result.standardError)["error"] as? [String: Any])
         XCTAssertEqual(details["code"] as? String, "usage")
     }
 
-    func testUnknownOptionFailsWithUsageExitCode() throws {
-        let result = invoke("status", "--verbose")
+    func testUnknownOptionFailsWithUsageExitCode() async throws {
+        let result = await invoke("status", "--verbose")
 
         XCTAssertEqual(result.exitCode, .usage)
         XCTAssertTrue(result.standardError.contains("unknown option '--verbose'"))
     }
 
-    func testUnexpectedExtraArgumentFailsWithUsageExitCode() throws {
+    func testUnexpectedExtraArgumentFailsWithUsageExitCode() async throws {
         try makeInitializedWorkspace()
 
-        let result = invoke("status", "extra")
+        let result = await invoke("status", "extra")
 
         XCTAssertEqual(result.exitCode, .usage)
         XCTAssertTrue(result.standardError.contains("unexpected argument 'extra'"))
     }
 
-    func testCatWithoutAReferenceFailsWithUsageExitCode() throws {
-        let result = invoke("cat")
+    func testCatWithoutAReferenceFailsWithUsageExitCode() async throws {
+        let result = await invoke("cat")
 
         XCTAssertEqual(result.exitCode, .usage)
         XCTAssertTrue(result.standardError.contains("'cat' needs a profile name, group/profile path, or --id"))
     }
 
-    func testCatWithBothANameAndIDFailsWithUsageExitCode() throws {
-        let result = invoke("cat", "Dev", "--id", "dev-id")
+    func testCatWithBothANameAndIDFailsWithUsageExitCode() async throws {
+        let result = await invoke("cat", "Dev", "--id", "dev-id")
 
         XCTAssertEqual(result.exitCode, .usage)
         XCTAssertTrue(result.standardError.contains("not both"))
     }
 
-    func testCatWithASecondPositionalFailsWithUsageExitCode() throws {
-        let result = invoke("cat", "Dev", "Staging")
+    func testCatWithASecondPositionalFailsWithUsageExitCode() async throws {
+        let result = await invoke("cat", "Dev", "Staging")
 
         XCTAssertEqual(result.exitCode, .usage)
         XCTAssertTrue(result.standardError.contains("unexpected argument 'Staging'"))
     }
 
-    func testIDOnACommandThatTakesNoReferenceFailsWithUsageExitCode() throws {
-        let result = invoke("status", "--id", "dev-id")
+    func testIDOnACommandThatTakesNoReferenceFailsWithUsageExitCode() async throws {
+        let result = await invoke("status", "--id", "dev-id")
 
         XCTAssertEqual(result.exitCode, .usage)
         XCTAssertTrue(result.standardError.contains("unexpected option '--id'"))
     }
 
-    func testIDWithoutAValueFailsWithUsageExitCode() throws {
-        let result = invoke("cat", "--id")
+    func testIDWithoutAValueFailsWithUsageExitCode() async throws {
+        let result = await invoke("cat", "--id")
 
         XCTAssertEqual(result.exitCode, .usage)
         XCTAssertTrue(result.standardError.contains("option '--id' requires a value"))
     }
 
-    func testBareInvocationFailsWithUsageExitCode() throws {
-        let result = invoke()
+    func testBareInvocationFailsWithUsageExitCode() async throws {
+        let result = await invoke()
 
         XCTAssertEqual(result.exitCode, .usage)
         XCTAssertEqual(result.standardOutput, "")
         XCTAssertTrue(result.standardError.contains("no command given"))
     }
 
-    func testHelpPrintsCanonicalCommandsAndSucceeds() throws {
-        let result = invoke("--help")
+    func testHelpPrintsCanonicalCommandsAndSucceeds() async throws {
+        let result = await invoke("--help")
 
         XCTAssertEqual(result.exitCode, .success)
         XCTAssertEqual(result.standardError, "")
@@ -396,8 +396,8 @@ final class CLITests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func invoke(_ arguments: String...) -> CLIResult {
-        CLI.run(
+    private func invoke(_ arguments: String...) async -> CLIResult {
+        await CLI.run(
             arguments: arguments,
             workspaceRootDirectory: workspaceRootDirectory,
             systemHostsURL: systemHostsURL

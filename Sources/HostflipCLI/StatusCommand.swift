@@ -2,10 +2,8 @@ import Foundation
 import HostflipCore
 
 /// `hostflip status`: reports the pause state, the active profiles (preserved even while paused),
-/// and whether the system hosts drifted. Drift uses the same baseline as the app's monitor: the
-/// workspace's expected hash (last confirmed merge write, or the pristine first-capture backup
-/// before any write) against the hash of the actual system hosts bytes. The CLI only reports
-/// drift, it never reconciles.
+/// and whether the system hosts drifted (SystemHostsDrift holds the comparison baseline). The
+/// CLI only reports drift, it never reconciles.
 enum StatusCommand {
     struct Payload: CommandPayload {
         struct ActiveProfile: Encodable {
@@ -44,21 +42,10 @@ enum StatusCommand {
             }
         }
 
-        let expectedHash = try workspace.expectedSystemHostsHash()
-        let actualData: Data
-        do {
-            actualData = try Data(contentsOf: systemHostsURL)
-        } catch {
-            throw CLIError(
-                code: "hosts-unreadable",
-                message: "cannot read \(systemHostsURL.path): \(error.localizedDescription)",
-                exitCode: .failure
-            )
-        }
         return Payload(
             paused: model.isPaused,
             active: active,
-            drift: MergedHosts.hash(of: actualData) != expectedHash
+            drift: try SystemHostsDrift.detect(workspace: workspace, systemHostsURL: systemHostsURL)
         )
     }
 }
