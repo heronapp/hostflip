@@ -113,6 +113,7 @@ echo "==> Signature acceptance gate (per object, every check is a hard failure)"
 codesign --verify --deep --strict "$APP"
 FRAMEWORK="$APP/Contents/Frameworks/Sparkle.framework"
 for T in "$APP/Contents/MacOS/Hostflip" "$APP/Contents/MacOS/hostflipd" \
+    "$APP/Contents/Helpers/hostflip" \
     "$FRAMEWORK/Versions/B/XPCServices/Installer.xpc" \
     "$FRAMEWORK/Versions/B/XPCServices/Downloader.xpc" \
     "$FRAMEWORK/Versions/B/Autoupdate" \
@@ -133,6 +134,9 @@ done
 DAEMON_INFO="$(codesign -dvv "$APP/Contents/MacOS/hostflipd" 2>&1)"
 echo "$DAEMON_INFO" | grep -q "Identifier=com.heronapp.hostflip.daemon" || \
     { echo "error: daemon signing identifier is not com.heronapp.hostflip.daemon" >&2; exit 1; }
+CLI_INFO="$(codesign -dvv "$APP/Contents/Helpers/hostflip" 2>&1)"
+echo "$CLI_INFO" | grep -q "Identifier=com.heronapp.hostflip.cli" || \
+    { echo "error: cli signing identifier is not com.heronapp.hostflip.cli" >&2; exit 1; }
 
 # notarytool --wait's exit code is not fully trustworthy; trust "status: Accepted"
 # in its output instead (observed in practice).
