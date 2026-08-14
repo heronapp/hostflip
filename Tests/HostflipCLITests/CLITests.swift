@@ -1,4 +1,5 @@
 import HostflipCore
+import HostflipXPC
 import XCTest
 @testable import HostflipCLI
 
@@ -401,6 +402,24 @@ final class CLITests: XCTestCase {
         XCTAssertTrue(result.standardOutput.contains("list"))
         XCTAssertTrue(result.standardOutput.contains("cat"))
         XCTAssertTrue(result.standardOutput.contains("--id"))
+    }
+
+    func testVersionPrintsTheBundleVersionAndSucceeds() async throws {
+        let result = await invoke("--version")
+
+        XCTAssertEqual(result.exitCode, .success)
+        XCTAssertEqual(result.standardError, "")
+        XCTAssertEqual(result.standardOutput, HostflipBuild.version + "\n")
+        XCTAssertTrue(CLI.usageText.contains("--version"))
+    }
+
+    func testVersionWithJSONEmitsAVersionObject() async throws {
+        let result = await invoke("--json", "--version")
+
+        XCTAssertEqual(result.exitCode, .success)
+        XCTAssertEqual(result.standardError, "")
+        let object = try jsonObject(result.standardOutput)
+        XCTAssertEqual(object["version"] as? String, HostflipBuild.version)
     }
 
     func testExitCodeFrameworkPinsTheNumericContract() {

@@ -56,6 +56,11 @@ echo "$BUILD" | grep -Eq '^[1-9][0-9]*$' || \
 # Dual version source (see ADR 0003): the plist and HostflipBuild.version must agree.
 grep -qF "public static let version = \"$VER\"" Sources/HostflipXPC/ChannelIdentity.swift || \
     { echo "error: HostflipBuild.version disagrees with $VER in $PLIST (the two locations must be updated together)" >&2; exit 1; }
+# Release notes are embedded into the Sparkle update dialog; failing here, before the build
+# investment, keeps "write the notes" a hard part of every release instead of a skipped nicety.
+NOTES="Packaging/ReleaseNotes/$VER.html"
+[ -f "$NOTES" ] || \
+    { echo "error: missing $NOTES (write the user-facing notes for $VER before releasing)" >&2; exit 1; }
 
 # Compare against the highest released tag on the remote: both the semantic
 # version and the build version must strictly increase.
@@ -181,13 +186,18 @@ spctl --assess --type open --context context:primary-signature "$DIST/$NAME.dmg"
     { echo "error: Gatekeeper (open) rejected the DMG" >&2; exit 1; }
 
 echo "==> Appcast (EdDSA-signed enclosure for the Sparkle feed)"
-"$SPARKLE_TOOLS/bin/generate_appcast" --account hostflip \
+# generate_appcast picks up release notes from an HTML file named like the archive.
+cp "$NOTES" "$DIST/$NAME.html"
+"$SPARKLE_TOOLS/bin/generate_appcast" --account hostflip --embed-release-notes \
     --download-url-prefix "https://github.com/heronapp/hostflip/releases/download/v$VER/" \
     -o "$DIST/appcast.xml" "$DIST"
+rm -f "$DIST/$NAME.html" # consumed into the appcast; keep $DIST holding release assets only
 grep -q "<sparkle:shortVersionString>$VER</sparkle:shortVersionString>" "$DIST/appcast.xml" || \
     { echo "error: appcast.xml does not contain version $VER" >&2; exit 1; }
 grep -q "sparkle:edSignature=" "$DIST/appcast.xml" || \
     { echo "error: appcast.xml enclosure carries no EdDSA signature" >&2; exit 1; }
+grep -q "<description>" "$DIST/appcast.xml" || \
+    { echo "error: appcast.xml carries no embedded release notes" >&2; exit 1; }
 
 if [ "$PUBLISH" -eq 0 ]; then
     echo "==> Done (--no-publish, GitHub untouched): $DIST/$NAME.dmg"

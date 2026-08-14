@@ -81,16 +81,12 @@ struct CLIInstallSection: View {
     var body: some View {
         let presentation = CLIInstallPresentation(cliPath: cliPath, linkState: linkState)
         VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 8) {
-                Label("Command-Line Tool", systemImage: "terminal")
-                    .font(.subheadline.weight(.semibold))
-                Text(
-                    "The bundled hostflip command drives the same profiles and helper as the app. Homebrew puts it on your PATH automatically; for a direct download, run this once in Terminal:"
-                )
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            }
+            Text(
+                "The bundled hostflip command drives the same profiles and helper as the app. Homebrew puts it on your PATH automatically; for a direct download, run this once in Terminal:"
+            )
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
 
             Text(presentation.command)
                 .font(.system(.callout, design: .monospaced))
@@ -100,30 +96,29 @@ struct CLIInstallSection: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
 
-            HStack {
-                HStack(spacing: 5) {
-                    Image(systemName: "circle.fill")
-                        .font(.system(size: 7))
-                        .foregroundStyle(presentation.statusColor)
-                    Text(presentation.statusTitle)
-                        .font(.caption)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                Spacer()
-                Button(isShowingCopied ? "Copied" : "Copy Command") {
-                    let pasteboard = NSPasteboard.general
-                    pasteboard.clearContents()
-                    pasteboard.setString(presentation.command, forType: .string)
-                    isShowingCopied = true
-                    Task {
-                        try? await Task.sleep(for: .seconds(1.5))
-                        isShowingCopied = false
-                    }
-                }
-                .disabled(isShowingCopied)
+            HStack(spacing: 5) {
+                Image(systemName: "circle.fill")
+                    .font(.system(size: 7))
+                    .foregroundStyle(presentation.statusColor)
+                Text(presentation.statusTitle)
+                    .font(.caption)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
+
+            Button(isShowingCopied ? "Copied" : "Copy Command") {
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.setString(presentation.command, forType: .string)
+                isShowingCopied = true
+                Task {
+                    try? await Task.sleep(for: .seconds(1.5))
+                    isShowingCopied = false
+                }
+            }
+            .disabled(isShowingCopied)
         }
+        .padding(20)
         .task { linkState = CLIInstallProbe.linkState(at: CLIInstallPresentation.linkPath) }
     }
 }
