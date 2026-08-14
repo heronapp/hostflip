@@ -21,7 +21,7 @@ enum ListCommand {
         let groups: [GroupEntry]
 
         var humanText: String {
-            var rows: [(label: String, id: String)] = []
+            var rows: [(label: String, trailing: String)] = []
             for profile in standaloneProfiles {
                 rows.append((profile.name, profile.id))
             }
@@ -32,12 +32,7 @@ enum ListCommand {
                 }
             }
             guard !rows.isEmpty else { return "No profiles." }
-            // Pad by hand: String.padding(toLength:) counts UTF-16 units and would truncate
-            // labels holding non-BMP characters, corrupting the ID column.
-            let width = rows.map(\.label.count).max()! + 2
-            return rows
-                .map { $0.label + String(repeating: " ", count: width - $0.label.count) + $0.id }
-                .joined(separator: "\n")
+            return CLIColumns.render(rows)
         }
     }
 

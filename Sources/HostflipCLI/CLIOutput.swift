@@ -23,6 +23,9 @@ struct CLIError: Error {
     let code: String
     let message: String
     let exitCode: ExitCode
+    /// Present only on ambiguity errors: every profile the reference could mean, feeding both
+    /// the human candidate listing and the JSON envelope's `candidates` field.
+    var candidates: [ProfileResolver.Candidate]? = nil
 
     static func usage(_ message: String) -> CLIError {
         CLIError(code: "usage", message: message, exitCode: .usage)
@@ -40,6 +43,13 @@ struct CLIResult {
 /// A command's result object: encodable verbatim for `--json`, plus a human-readable rendering.
 protocol CommandPayload: Encodable {
     var humanText: String { get }
+    /// Verbatim payloads (cat) own their exact bytes; every other human rendering gets a
+    /// trailing newline appended by the CLI.
+    var humanTextIsVerbatim: Bool { get }
+}
+
+extension CommandPayload {
+    var humanTextIsVerbatim: Bool { false }
 }
 
 /// The `--json` error shape on stderr: `{"error":{"code":…,"message":…}}`. Fields are only ever
@@ -48,9 +58,23 @@ struct ErrorEnvelope: Encodable {
     struct Details: Encodable {
         let code: String
         let message: String
+        /// Present only on ambiguity errors; omitted from the JSON otherwise.
+        let candidates: [ProfileResolver.Candidate]?
     }
 
     let error: Details
+}
+
+enum CLIColumns {
+    /// Renders non-empty (label, trailing) rows as two aligned columns. Padded by hand:
+    /// String.padding(toLength:) counts UTF-16 units and would truncate labels holding
+    /// non-BMP characters, corrupting the trailing column.
+    static func render(_ rows: [(label: String, trailing: String)]) -> String {
+        let width = rows.map(\.label.count).max()! + 2
+        return rows
+            .map { $0.label + String(repeating: " ", count: width - $0.label.count) + $0.trailing }
+            .joined(separator: "\n")
+    }
 }
 
 enum CLIJSON {

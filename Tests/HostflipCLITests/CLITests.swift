@@ -165,6 +165,117 @@ final class CLITests: XCTestCase {
         XCTAssertEqual(result.standardOutput, "No profiles.\n")
     }
 
+    // MARK: - cat
+
+    func testCatByNamePrintsTheProfileContentVerbatim() throws {
+        try makeInitializedWorkspace()
+
+        let result = invoke("cat", "Dev")
+
+        XCTAssertEqual(result.exitCode, .success)
+        XCTAssertEqual(result.standardError, "")
+        // Verbatim: the fixture content has no trailing newline, so neither has stdout.
+        XCTAssertEqual(result.standardOutput, "# dev")
+    }
+
+    func testCatPreservesATrailingNewlineExactly() throws {
+        let workspace = Workspace(rootDirectory: workspaceRootDirectory)
+        _ = try workspace.open(systemHosts: { capturedHosts })
+        let content = "127.0.0.1 dev.local\n"
+        let model = try ActivationModel(
+            baseHosts: BaseHosts(content: capturedHosts),
+            standaloneProfiles: [Profile(id: .init("dev-id"), name: "Dev", content: content)],
+            groups: []
+        )
+        try workspace.save(model)
+
+        let result = invoke("cat", "Dev")
+
+        XCTAssertEqual(result.standardOutput, content)
+    }
+
+    func testCatByPathPrintsTheNamedGroupMember() throws {
+        try makeInitializedWorkspace()
+
+        let result = invoke("cat", "Work/Staging")
+
+        XCTAssertEqual(result.exitCode, .success)
+        XCTAssertEqual(result.standardOutput, "# staging")
+    }
+
+    func testCatByIDPrintsTheProfile() throws {
+        try makeInitializedWorkspace()
+
+        let result = invoke("cat", "--id", "solo-id")
+
+        XCTAssertEqual(result.exitCode, .success)
+        XCTAssertEqual(result.standardOutput, "# solo")
+    }
+
+    func testCatJSONReportsTheResolvedProfileWithItsContent() throws {
+        try makeInitializedWorkspace()
+
+        let result = invoke("--json", "cat", "Dev")
+
+        XCTAssertEqual(result.exitCode, .success)
+        let object = try jsonObject(result.standardOutput)
+        XCTAssertEqual(object["id"] as? String, "dev-id")
+        XCTAssertEqual(object["name"] as? String, "Dev")
+        XCTAssertEqual(object["group"] as? String, "Work")
+        XCTAssertEqual(object["content"] as? String, "# dev")
+    }
+
+    func testCatUnknownReferenceFailsWithNotFoundExitCode() throws {
+        try makeInitializedWorkspace()
+
+        let result = invoke("cat", "Missing")
+
+        XCTAssertEqual(result.exitCode, .notFound)
+        XCTAssertEqual(result.standardOutput, "")
+        XCTAssertTrue(result.standardError.contains("no profile matches 'Missing'"))
+    }
+
+    func testCatUnknownReferenceJSONErrorCarriesTheNotFoundCodeWithoutCandidates() throws {
+        try makeInitializedWorkspace()
+
+        let result = invoke("--json", "cat", "--id", "missing-id")
+
+        XCTAssertEqual(result.exitCode, .notFound)
+        let details = try XCTUnwrap(try jsonObject(result.standardError)["error"] as? [String: Any])
+        XCTAssertEqual(details["code"] as? String, "profile-not-found")
+        XCTAssertNil(details["candidates"])
+    }
+
+    func testCatAmbiguousReferenceListsEveryCandidateWithItsID() throws {
+        try makeAmbiguousWorkspace()
+
+        let result = invoke("cat", "Dev")
+
+        XCTAssertEqual(result.exitCode, .ambiguous)
+        XCTAssertEqual(result.standardOutput, "")
+        // The standalone candidate has no path prefix — that's exactly the case --id exists for.
+        XCTAssertEqual(result.standardError, """
+            hostflip: 'Dev' matches multiple profiles; disambiguate with a group/profile path or --id:
+              Dev       solo-dev-id
+              Work/Dev  work-dev-id
+
+            """)
+    }
+
+    func testCatAmbiguousReferenceJSONErrorCarriesTheCandidates() throws {
+        try makeAmbiguousWorkspace()
+
+        let result = invoke("--json", "cat", "Dev")
+
+        XCTAssertEqual(result.exitCode, .ambiguous)
+        let details = try XCTUnwrap(try jsonObject(result.standardError)["error"] as? [String: Any])
+        XCTAssertEqual(details["code"] as? String, "profile-ambiguous")
+        let candidates = try XCTUnwrap(details["candidates"] as? [[String: Any]])
+        XCTAssertEqual(candidates.map { $0["id"] as? String }, ["solo-dev-id", "work-dev-id"])
+        XCTAssertEqual(candidates.map { $0["name"] as? String }, ["Dev", "Dev"])
+        XCTAssertEqual(candidates.map { $0["group"] as? String }, [nil, "Work"])
+    }
+
     // MARK: - Errors and exit codes
 
     func testUninitializedWorkspaceFailsWithGeneralErrorExitCode() throws {
@@ -217,6 +328,41 @@ final class CLITests: XCTestCase {
         XCTAssertTrue(result.standardError.contains("unexpected argument 'extra'"))
     }
 
+    func testCatWithoutAReferenceFailsWithUsageExitCode() throws {
+        let result = invoke("cat")
+
+        XCTAssertEqual(result.exitCode, .usage)
+        XCTAssertTrue(result.standardError.contains("'cat' needs a profile name, group/profile path, or --id"))
+    }
+
+    func testCatWithBothANameAndIDFailsWithUsageExitCode() throws {
+        let result = invoke("cat", "Dev", "--id", "dev-id")
+
+        XCTAssertEqual(result.exitCode, .usage)
+        XCTAssertTrue(result.standardError.contains("not both"))
+    }
+
+    func testCatWithASecondPositionalFailsWithUsageExitCode() throws {
+        let result = invoke("cat", "Dev", "Staging")
+
+        XCTAssertEqual(result.exitCode, .usage)
+        XCTAssertTrue(result.standardError.contains("unexpected argument 'Staging'"))
+    }
+
+    func testIDOnACommandThatTakesNoReferenceFailsWithUsageExitCode() throws {
+        let result = invoke("status", "--id", "dev-id")
+
+        XCTAssertEqual(result.exitCode, .usage)
+        XCTAssertTrue(result.standardError.contains("unexpected option '--id'"))
+    }
+
+    func testIDWithoutAValueFailsWithUsageExitCode() throws {
+        let result = invoke("cat", "--id")
+
+        XCTAssertEqual(result.exitCode, .usage)
+        XCTAssertTrue(result.standardError.contains("option '--id' requires a value"))
+    }
+
     func testBareInvocationFailsWithUsageExitCode() throws {
         let result = invoke()
 
@@ -233,6 +379,8 @@ final class CLITests: XCTestCase {
         XCTAssertTrue(result.standardOutput.contains("Usage: hostflip"))
         XCTAssertTrue(result.standardOutput.contains("status"))
         XCTAssertTrue(result.standardOutput.contains("list"))
+        XCTAssertTrue(result.standardOutput.contains("cat"))
+        XCTAssertTrue(result.standardOutput.contains("--id"))
     }
 
     func testExitCodeFrameworkPinsTheNumericContract() {
@@ -277,6 +425,23 @@ final class CLITests: XCTestCase {
         try workspace.save(model)
         try Data(capturedHosts.utf8).write(to: systemHostsURL)
         return workspace
+    }
+
+    /// Initializes a workspace where the bare name "Dev" is ambiguous between a standalone
+    /// profile and a group member.
+    private func makeAmbiguousWorkspace() throws {
+        let workspace = Workspace(rootDirectory: workspaceRootDirectory)
+        _ = try workspace.open(systemHosts: { capturedHosts })
+        let model = try ActivationModel(
+            baseHosts: BaseHosts(content: capturedHosts),
+            standaloneProfiles: [Profile(id: .init("solo-dev-id"), name: "Dev", content: "# solo dev")],
+            groups: [
+                Group(id: .init("work-id"), name: "Work", profiles: [
+                    Profile(id: .init("work-dev-id"), name: "Dev", content: "# work dev"),
+                ]),
+            ]
+        )
+        try workspace.save(model)
     }
 
     private func jsonObject(_ text: String) throws -> [String: Any] {
