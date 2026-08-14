@@ -111,7 +111,6 @@ struct HelperMaintenanceSection: View {
     let maintenanceStore: MaintenanceStore
     /// Runs before jumping to System Settings; the popover closes itself here.
     var beforeOpeningSystemSettings: () -> Void = {}
-    @State private var isConfirmingRemoval = false
 
     var body: some View {
         let helperPresentation = HelperStatusPresentation(maintenanceStore.helperStatus)
@@ -134,15 +133,8 @@ struct HelperMaintenanceSection: View {
                             }
                         }
                         Spacer()
-                        if maintenanceStore.isRemovingHelper {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
                         if helperPresentation.canRemove {
-                            Button(removalButtonTitle, role: .destructive) {
-                                isConfirmingRemoval = true
-                            }
-                            .disabled(maintenanceStore.isRemovingHelper)
+                            HelperRemovalButton(maintenanceStore: maintenanceStore)
                         }
                     }
                     .controlSize(.small)
@@ -150,26 +142,68 @@ struct HelperMaintenanceSection: View {
             }
 
             if let feedback = maintenanceStore.feedback {
-                let feedbackPresentation = feedback.presentation
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(feedbackPresentation.title)
-                            .fontWeight(.semibold)
-                        Text(feedbackPresentation.message)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                } icon: {
-                    Image(
-                        systemName: feedbackPresentation.isFailure
-                            ? "xmark.octagon.fill"
-                            : "checkmark.circle.fill"
-                    )
-                }
-                .font(.callout)
-                .foregroundStyle(feedbackPresentation.isFailure ? .red : .green)
+                MaintenanceFeedbackLabel(feedback: feedback)
             }
         }
         .task { await maintenanceStore.refreshHelperStatus() }
+    }
+}
+
+/// Settings > Helper: the same status and removal flow as the popover, laid out as a
+/// label-less full-width block like the Command Line tab (the tab title already names
+/// the pane). Both homes share the store and the controls below, so they can never
+/// disagree (#41).
+struct HelperSettingsPane: View {
+    let store: WorkspaceStore
+    let maintenanceStore: MaintenanceStore
+
+    var body: some View {
+        let presentation = HelperStatusPresentation(maintenanceStore.helperStatus)
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 6) {
+                HelperStatusLabel(status: maintenanceStore.helperStatus)
+                Text(presentation.description)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if presentation.canOpenApprovalSettings {
+                Button("Open System Settings…") {
+                    store.openApprovalSettings()
+                }
+            }
+
+            if presentation.canRemove {
+                HelperRemovalButton(maintenanceStore: maintenanceStore)
+            }
+
+            if let feedback = maintenanceStore.feedback {
+                MaintenanceFeedbackLabel(feedback: feedback)
+            }
+        }
+        .padding(20)
+        .task { await maintenanceStore.refreshHelperStatus() }
+    }
+}
+
+/// The destructive removal flow — confirmation dialog, in-flight progress, retry title —
+/// shared by the popover and Settings so the two homes can never diverge.
+struct HelperRemovalButton: View {
+    let maintenanceStore: MaintenanceStore
+    @State private var isConfirmingRemoval = false
+
+    var body: some View {
+        HStack {
+            if maintenanceStore.isRemovingHelper {
+                ProgressView()
+                    .controlSize(.small)
+            }
+            Button(title, role: .destructive) {
+                isConfirmingRemoval = true
+            }
+            .disabled(maintenanceStore.isRemovingHelper)
+        }
         .confirmationDialog(
             "Deactivate and Remove Helper?",
             isPresented: $isConfirmingRemoval,
@@ -183,10 +217,35 @@ struct HelperMaintenanceSection: View {
         }
     }
 
-    private var removalButtonTitle: String {
+    private var title: String {
         if case .helperRemovalFailed = maintenanceStore.feedback {
             return "Retry Remove Helper…"
         }
         return "Deactivate and Remove Helper…"
+    }
+}
+
+/// Outcome of the last maintenance operation, rendered identically in both homes.
+struct MaintenanceFeedbackLabel: View {
+    let feedback: MaintenanceFeedback
+
+    var body: some View {
+        let presentation = feedback.presentation
+        Label {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(presentation.title)
+                    .fontWeight(.semibold)
+                Text(presentation.message)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } icon: {
+            Image(
+                systemName: presentation.isFailure
+                    ? "xmark.octagon.fill"
+                    : "checkmark.circle.fill"
+            )
+        }
+        .font(.callout)
+        .foregroundStyle(presentation.isFailure ? .red : .green)
     }
 }
