@@ -1,3 +1,4 @@
+import Security
 import XCTest
 @testable import HostflipXPC
 
@@ -24,6 +25,24 @@ final class CodeSigningRequirementTests: XCTestCase {
             requirement,
             #"(identifier "com.heronapp.hostflip" or identifier "com.heronapp.hostflip.cli") and anchor apple generic and certificate leaf[subject.OU] = "ABCDE12345""#
         )
+    }
+
+    func testGeneratedRequirementsCompileInTheRequirementLanguage() throws {
+        for identifiers in [
+            [ChannelIdentity.daemonIdentifier],
+            [ChannelIdentity.appBundleID, ChannelIdentity.cliIdentifier],
+        ] {
+            let requirement = try CodeSigningRequirement.peerRequirement(
+                identifiers: identifiers,
+                teamID: "ABCDE12345"
+            )
+            var compiled: SecRequirement?
+            XCTAssertEqual(
+                SecRequirementCreateWithString(requirement as CFString, SecCSFlags(), &compiled),
+                errSecSuccess,
+                "not valid requirement syntax: \(requirement)"
+            )
+        }
     }
 
     func testRejectsEmptyIdentifierList() {
