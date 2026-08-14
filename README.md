@@ -31,9 +31,14 @@ Editing `/etc/hosts` by hand — or typing your password every time a hosts mana
     brew trust heronapp/tap   # newer Homebrew requires trusting third-party taps once
     brew install --cask hostflip
 
+This installs the app and puts the bundled `hostflip` command-line tool on your PATH.
+
 **Direct download**
 
-Grab the notarized DMG from [Releases](https://github.com/heronapp/hostflip/releases/latest) and drag `Hostflip.app` into `/Applications`.
+Grab the notarized DMG from [Releases](https://github.com/heronapp/hostflip/releases/latest) and drag `Hostflip.app` into `/Applications`. To use the `hostflip` command-line tool, symlink it out of the bundle:
+
+    sudo mkdir -p /usr/local/bin
+    sudo ln -sf /Applications/Hostflip.app/Contents/Helpers/hostflip /usr/local/bin/hostflip
 
 Requires macOS 14 or later on Apple silicon.
 
