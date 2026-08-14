@@ -518,6 +518,98 @@ final class WorkspaceTests: XCTestCase {
         XCTAssertEqual(try workspace.lastWrittenHash(), "a249a12a2f3b5dd513ea921e2b02fa1f")
     }
 
+    // MARK: - Reload-and-replay saving (ADR-0010 ②)
+
+    func testSaveApplyingReplaysTheChangeOnTheLatestDiskState() throws {
+        let workspace = Workspace(rootDirectory: rootDirectory)
+        _ = try workspace.open(systemHosts: { "127.0.0.1 localhost" })
+        // A foreign writer (the CLI) adds a profile and activates it after this instance last read the workspace
+        var foreign = try reopenWithoutImporting(Workspace(rootDirectory: rootDirectory))
+        try foreign.addProfile(id: .init("cli"), name: "CLI", content: "# cli")
+        try foreign.toggleProfile(.init("cli"))
+        try Workspace(rootDirectory: rootDirectory).save(foreign)
+
+        let outcome = try workspace.save(applying: {
+            try $0.addProfile(id: .init("gui"), name: "GUI", content: "# gui")
+        })
+
+        guard case .saved(let saved) = outcome else {
+            return XCTFail("在最新状态上重放应当成功保存")
+        }
+        XCTAssertEqual(saved.standaloneProfiles.map(\.id), [.init("cli"), .init("gui")])
+        XCTAssertEqual(saved.activeProfileIDs, [.init("cli")])
+        let reloaded = try reopenWithoutImporting(workspace)
+        XCTAssertEqual(reloaded.standaloneProfiles.map(\.id), [.init("cli"), .init("gui")])
+        XCTAssertEqual(reloaded.activeProfileIDs, [.init("cli")])
+        XCTAssertTrue(workspaceFileExists("profiles/CLI.hosts"))
+    }
+
+    func testSaveApplyingKeepsAForeignlyCreatedProfileFileOutOfStaleCleanup() throws {
+        let workspace = Workspace(rootDirectory: rootDirectory)
+        _ = try workspace.open(systemHosts: { "127.0.0.1 localhost" })
+        var foreign = try reopenWithoutImporting(Workspace(rootDirectory: rootDirectory))
+        try foreign.addProfile(id: .init("cli"), name: "CLI", content: "# cli")
+        try Workspace(rootDirectory: rootDirectory).save(foreign)
+
+        _ = try workspace.save(applying: { _ in })
+
+        XCTAssertTrue(workspaceFileExists("profiles/CLI.hosts"))
+        XCTAssertEqual(
+            try reopenWithoutImporting(workspace).standaloneProfiles.map(\.id),
+            [.init("cli")]
+        )
+    }
+
+    func testSaveApplyingConflictWritesNothingAndReturnsTheLatestState() throws {
+        let workspace = Workspace(rootDirectory: rootDirectory)
+        var model = try workspace.open(systemHosts: { "127.0.0.1 localhost" })
+        try model.addProfile(id: .init("doomed"), name: "Doomed", content: "# doomed")
+        try workspace.save(model)
+        var foreign = try reopenWithoutImporting(Workspace(rootDirectory: rootDirectory))
+        try foreign.deleteProfile(.init("doomed"))
+        try Workspace(rootDirectory: rootDirectory).save(foreign)
+
+        let outcome = try workspace.save(applying: {
+            try $0.renameProfile(.init("doomed"), to: "Renamed")
+        })
+
+        guard case .conflict(let latest, let reason) = outcome else {
+            return XCTFail("在被外部删除的 profile 上重放应当报告冲突")
+        }
+        XCTAssertEqual(latest.standaloneProfiles, [])
+        XCTAssertEqual(
+            reason as? ActivationModelError,
+            .unknownProfile(.init("doomed"))
+        )
+        XCTAssertEqual(try reopenWithoutImporting(workspace).standaloneProfiles, [])
+        XCTAssertFalse(workspaceFileExists("profiles/Doomed.hosts"))
+    }
+
+    func testSaveApplyingPreservesTheRecordedHashAndAcceptsANewOne() throws {
+        let workspace = Workspace(rootDirectory: rootDirectory)
+        _ = try workspace.open(systemHosts: { "127.0.0.1 localhost" })
+        try workspace.recordLastWrittenHash("a249a12a2f3b5dd513ea921e2b02fa1f")
+
+        _ = try workspace.save(applying: {
+            try $0.addProfile(id: .init("blocker"), name: "Blocker", content: "# blocker")
+        })
+        XCTAssertEqual(try workspace.lastWrittenHash(), "a249a12a2f3b5dd513ea921e2b02fa1f")
+
+        _ = try workspace.save(
+            applying: { $0.baseHosts.content = "127.0.0.1 localhost reviewed" },
+            acceptingSystemHostsHash: "ffffffffffffffffffffffffffffffff"
+        )
+        XCTAssertEqual(try workspace.lastWrittenHash(), "ffffffffffffffffffffffffffffffff")
+    }
+
+    func testSaveApplyingIntoAnUninitializedWorkspaceIsRejected() throws {
+        let workspace = Workspace(rootDirectory: rootDirectory)
+
+        XCTAssertThrowsError(try workspace.save(applying: { _ in })) { error in
+            XCTAssertEqual(error as? WorkspaceError, .notInitialized)
+        }
+    }
+
     /// Holds the kernel-exclusive flock on manifest.lock through an independently opened descriptor,
     /// simulating another process's holder: flock ownership follows the open file description, so an
     /// independent descriptor contends with Workspace's own exactly like a real foreign process would —

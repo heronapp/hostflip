@@ -1359,6 +1359,223 @@ final class WorkspaceStoreTests: XCTestCase {
         return url
     }
 
+    // MARK: - External-writer coexistence (#53, ADR-0010 ②③)
+
+    @MainActor
+    func testEditReplaysOnAForeignlyModifiedWorkspace() throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub())
+        foreignlyModifyWorkspace {
+            try $0.addProfile(id: .init("cli"), name: "CLI", content: "# cli\n")
+            try $0.toggleProfile(.init("cli"))
+        }
+
+        let profileID = try XCTUnwrap(store.createStandaloneProfile())
+
+        XCTAssertEqual(store.standaloneProfiles.map(\.id), [.init("cli"), profileID])
+        XCTAssertEqual(store.model?.activeProfileIDs, [.init("cli")])
+        XCTAssertNil(store.saveError)
+        let reloaded = try reloadModel()
+        XCTAssertEqual(reloaded.standaloneProfiles.map(\.id), [.init("cli"), profileID])
+        XCTAssertEqual(reloaded.activeProfileIDs, [.init("cli")])
+        // The foreign profile's file must survive the save's stale-file cleanup
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: rootDirectory.appendingPathComponent("profiles/CLI.hosts").path
+        ))
+    }
+
+    @MainActor
+    func testEditOnAForeignlyDeletedProfileIsDroppedAndAdoptsTheLatestState() throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub())
+        let profileID = try XCTUnwrap(store.createStandaloneProfile())
+        foreignlyModifyWorkspace { try $0.deleteProfile(profileID) }
+
+        store.renameProfile(profileID, to: "Renamed")
+
+        XCTAssertEqual(store.standaloneProfiles, [])
+        XCTAssertNil(store.saveError)
+        XCTAssertEqual(try reloadModel().standaloneProfiles, [])
+    }
+
+    @MainActor
+    func testSwitchCommitReplaysOnForeignChangesMadeWhileInFlight() async throws {
+        let stub = SwitchCoordinatingStub()
+        let store = makeStore(coordinator: stub)
+        let profileID = try XCTUnwrap(store.createStandaloneProfile())
+        stub.whileSwitchInFlight = { [self] in
+            foreignlyModifyWorkspace {
+                try $0.addProfile(id: .init("cli"), name: "CLI", content: "# cli\n")
+            }
+        }
+
+        store.setProfileActive(profileID, true)
+        await store.switchTask?.value
+
+        XCTAssertEqual(store.switchFeedback, .merged)
+        XCTAssertEqual(store.standaloneProfiles.map(\.id), [profileID, .init("cli")])
+        XCTAssertTrue(store.isActive(profileID))
+        let reloaded = try reloadModel()
+        XCTAssertEqual(reloaded.standaloneProfiles.map(\.id), [profileID, .init("cli")])
+        XCTAssertEqual(reloaded.activeProfileIDs, [profileID])
+    }
+
+    @MainActor
+    func testSwitchCommitOnAForeignlyDeletedProfileDropsTheCommit() async throws {
+        let stub = SwitchCoordinatingStub()
+        let store = makeStore(coordinator: stub)
+        let profileID = try XCTUnwrap(store.createStandaloneProfile())
+        stub.whileSwitchInFlight = { [self] in
+            foreignlyModifyWorkspace { try $0.deleteProfile(profileID) }
+        }
+
+        store.setProfileActive(profileID, true)
+        await store.switchTask?.value
+
+        XCTAssertEqual(store.standaloneProfiles, [])
+        XCTAssertEqual(store.model?.activeProfileIDs, [])
+        XCTAssertEqual(try reloadModel().standaloneProfiles, [])
+        // The system hosts was already written with the dropped state; the follow-up merge converges it back
+        XCTAssertNotNil(store.followUpMergeTask)
+    }
+
+    @MainActor
+    func testReconciliationReplaysOnForeignChangesMadeWhileInFlight() async throws {
+        let actualHosts = Self.importedHosts + "1.2.3.4 external.local\n"
+        let coordinator = SwitchCoordinatingStub()
+        let monitor = HostsDriftMonitoringStub()
+        let store = makeStore(
+            coordinator: coordinator,
+            driftMonitor: monitor,
+            systemHosts: Data(actualHosts.utf8)
+        )
+        monitor.report(true)
+        coordinator.whileReconciliationInFlight = { [self] in
+            foreignlyModifyWorkspace {
+                try $0.addProfile(id: .init("cli"), name: "CLI", content: "# cli\n")
+            }
+        }
+
+        store.reconcileHosts(.addDriftLinesToBaseHosts)
+        await store.reconciliationTask?.value
+
+        XCTAssertEqual(store.baseHostsContent, Self.importedHosts + "1.2.3.4 external.local\n")
+        XCTAssertEqual(store.standaloneProfiles.map(\.id), [.init("cli")])
+        let reloaded = try reloadModel()
+        XCTAssertEqual(reloaded.baseHosts.content, store.baseHostsContent)
+        XCTAssertEqual(reloaded.standaloneProfiles.map(\.id), [.init("cli")])
+    }
+
+    @MainActor
+    func testImportReplaysOnAForeignlyModifiedWorkspace() throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub())
+        foreignlyModifyWorkspace {
+            try $0.addProfile(id: .init("cli"), name: "CLI", content: "# cli\n")
+        }
+
+        let outcome = store.importFiles(at: [
+            try writeImportFile(named: "Team DB.hosts", Data("10.0.0.3 db.example\n".utf8))
+        ])
+
+        XCTAssertEqual(outcome, .imported)
+        XCTAssertEqual(store.standaloneProfiles.map(\.name), ["CLI", "Team DB"])
+        XCTAssertEqual(try reloadModel().standaloneProfiles.map(\.name), ["CLI", "Team DB"])
+    }
+
+    @MainActor
+    func testDegradedSaveSelfHealsUnsavedEditsOnceTheDiskRecovers() throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub())
+        let profileID = try XCTUnwrap(store.createStandaloneProfile())
+        let manifestURL = rootDirectory.appendingPathComponent("manifest.json")
+        let validManifest = try Data(contentsOf: manifestURL)
+        try Data("invalid manifest".utf8).write(to: manifestURL, options: .atomic)
+
+        store.renameProfile(profileID, to: "First Edit")
+        XCTAssertNotNil(store.saveError)
+        XCTAssertEqual(store.standaloneProfiles.map(\.name), ["First Edit"])
+
+        try validManifest.write(to: manifestURL, options: .atomic)
+        store.updateProfileContent(profileID, content: "# healed\n")
+
+        XCTAssertNil(store.saveError)
+        let reloaded = try reloadModel()
+        XCTAssertEqual(reloaded.standaloneProfiles.map(\.name), ["First Edit"])
+        XCTAssertEqual(reloaded.standaloneProfiles.map(\.content), ["# healed\n"])
+    }
+
+    @MainActor
+    func testRefreshFromExternalChangeReloadsTheModelWithoutMerging() throws {
+        let stub = SwitchCoordinatingStub()
+        let store = makeStore(coordinator: stub)
+        foreignlyModifyWorkspace {
+            try $0.addProfile(id: .init("cli"), name: "CLI", content: "# cli\n")
+        }
+
+        store.refreshFromExternalChange()
+
+        XCTAssertEqual(store.standaloneProfiles.map(\.id), [.init("cli")])
+        // Display refresh only: nothing reaches the coordinator and no follow-up merge is scheduled
+        XCTAssertNil(store.followUpMergeTask)
+        XCTAssertTrue(stub.authorizedMerges.isEmpty)
+        XCTAssertTrue(stub.performedSwitches.isEmpty)
+    }
+
+    @MainActor
+    func testRefreshFromExternalChangeSkipsWhileASaveErrorKeepsUnsavedEdits() throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub())
+        let profileID = try XCTUnwrap(store.createStandaloneProfile())
+        let manifestURL = rootDirectory.appendingPathComponent("manifest.json")
+        let validManifest = try Data(contentsOf: manifestURL)
+        try Data("invalid manifest".utf8).write(to: manifestURL, options: .atomic)
+        store.renameProfile(profileID, to: "Kept Edit")
+        XCTAssertNotNil(store.saveError)
+        try validManifest.write(to: manifestURL, options: .atomic)
+        foreignlyModifyWorkspace {
+            try $0.addProfile(id: .init("cli"), name: "CLI", content: "# cli\n")
+        }
+
+        store.refreshFromExternalChange()
+
+        XCTAssertEqual(store.standaloneProfiles.map(\.name), ["Kept Edit"])
+        XCTAssertNotNil(store.saveError)
+    }
+
+    @MainActor
+    func testRefreshFromExternalChangeSkipsWhileASwitchIsInFlight() async throws {
+        let stub = SwitchCoordinatingStub()
+        let store = makeStore(coordinator: stub)
+        let profileID = try XCTUnwrap(store.createStandaloneProfile())
+        var refreshedDuringSwitch = true
+        stub.whileSwitchInFlight = { [self] in
+            foreignlyModifyWorkspace {
+                try $0.addProfile(id: .init("cli"), name: "CLI", content: "# cli\n")
+            }
+            store.refreshFromExternalChange()
+            refreshedDuringSwitch = store.standaloneProfiles.contains { $0.id == .init("cli") }
+        }
+
+        store.setProfileActive(profileID, true)
+        await store.switchTask?.value
+
+        XCTAssertFalse(refreshedDuringSwitch)
+        // The commit's own reload-and-replay picks the foreign change up afterwards
+        XCTAssertEqual(store.standaloneProfiles.map(\.id), [profileID, .init("cli")])
+    }
+
+    /// Simulates a foreign writer (e.g. the CLI): mutates the on-disk state through an independent
+    /// Workspace instance, bypassing the store's in-memory model.
+    private func foreignlyModifyWorkspace(_ change: (inout ActivationModel) throws -> Void) {
+        do {
+            let workspace = Workspace(rootDirectory: rootDirectory)
+            var model = try workspace.open(systemHosts: {
+                XCTFail("已初始化的工作区不应再导入系统 hosts")
+                return ""
+            })
+            try change(&model)
+            try workspace.save(model)
+        } catch {
+            XCTFail("外部修改工作区失败：\(error)")
+        }
+    }
+
     // MARK: - Helpers
 
     @MainActor

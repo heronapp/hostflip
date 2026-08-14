@@ -114,49 +114,109 @@ public struct Workspace: Sendable {
             throw WorkspaceError.notInitialized
         }
         try withManifestLock {
-            // Read the old manifest before writing any content files: we must neither discover a corrupt manifest
-            // after leaving half a set of new content behind, nor silently reset the stored hash (#24's comparison primitive) to nil.
-            let priorLastWrittenHash = FileManager.default.fileExists(atPath: manifestURL.path)
-                ? try loadManifest().lastWrittenHash
-                : nil
-            try FileManager.default.createDirectory(at: profilesDirectory, withIntermediateDirectories: true)
-            try write(model.baseHosts.content, to: baseHostsURL)
+            try saveLocked(model, acceptingSystemHostsHash: acceptedHash)
+        }
+    }
 
-            let fileNames = assignFileNames(for: model.standaloneProfiles + model.groups.flatMap(\.profiles))
-            func writeProfileFile(for profile: Profile) throws -> ManifestProfile {
-                let fileName = fileNames[profile.id]!
-                try write(profile.content, to: profilesDirectory.appendingPathComponent(fileName))
-                return ManifestProfile(id: profile.id.rawValue, name: profile.name, file: fileName)
+    /// The save body proper; the caller must hold the manifest lock.
+    private func saveLocked(
+        _ model: ActivationModel,
+        acceptingSystemHostsHash acceptedHash: String?
+    ) throws {
+        // Read the old manifest before writing any content files: we must neither discover a corrupt manifest
+        // after leaving half a set of new content behind, nor silently reset the stored hash (#24's comparison primitive) to nil.
+        let priorLastWrittenHash = FileManager.default.fileExists(atPath: manifestURL.path)
+            ? try loadManifest().lastWrittenHash
+            : nil
+        try FileManager.default.createDirectory(at: profilesDirectory, withIntermediateDirectories: true)
+        try write(model.baseHosts.content, to: baseHostsURL)
+
+        let fileNames = assignFileNames(for: model.standaloneProfiles + model.groups.flatMap(\.profiles))
+        func writeProfileFile(for profile: Profile) throws -> ManifestProfile {
+            let fileName = fileNames[profile.id]!
+            try write(profile.content, to: profilesDirectory.appendingPathComponent(fileName))
+            return ManifestProfile(id: profile.id.rawValue, name: profile.name, file: fileName)
+        }
+
+        let manifest = try Manifest(
+            standaloneProfiles: model.standaloneProfiles.map(writeProfileFile),
+            groups: model.groups.map { group in
+                try ManifestGroup(
+                    id: group.id.rawValue,
+                    name: group.name,
+                    profiles: group.profiles.map(writeProfileFile)
+                )
+            },
+            activeProfileIDs: model.activeProfileIDs.map(\.rawValue).sorted(),
+            isPaused: model.isPaused,
+            lastWrittenHash: acceptedHash ?? priorLastWrittenHash
+        )
+        try writeManifest(manifest)
+
+        // Stale profile files are cleaned up only after the manifest is persisted — and best-effort:
+        // the manifest write is the commit point, so a cleanup failure must not turn an already
+        // committed save into a thrown one (callers that commit in-memory state only on success
+        // would diverge from disk). An unremoved stale file is unreferenced and retried next save.
+        let expectedFileNames = Set(fileNames.values.map { $0.lowercased() })
+        let leftovers = (try? FileManager.default.contentsOfDirectory(
+            at: profilesDirectory,
+            includingPropertiesForKeys: nil
+        )) ?? []
+        for url in leftovers
+        where url.pathExtension == "hosts" && !expectedFileNames.contains(url.lastPathComponent.lowercased()) {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    // MARK: - Reload-and-replay saving (ADR-0010 ②)
+
+    /// Outcome of a reload-and-replay save.
+    public enum ReplayedSaveOutcome: Sendable {
+        /// The change was applied to the latest on-disk state and the result persisted.
+        case saved(ActivationModel)
+        /// The change does not apply to the latest on-disk state (e.g. it targets a profile another
+        /// process deleted); nothing was written. Carries the untouched latest state and the error
+        /// the change threw.
+        case conflict(latest: ActivationModel, reason: any Error)
+    }
+
+    /// Saves by replaying `change` on the latest on-disk state instead of overwriting the disk with
+    /// a model loaded earlier: reload, replay, and write all run under the manifest lock, so changes
+    /// another process made since this instance last read the workspace survive the save (ADR-0010 ②).
+    public func save(
+        applying change: (inout ActivationModel) throws -> Void
+    ) throws -> ReplayedSaveOutcome {
+        try save(applying: change, acceptingSystemHostsHash: nil)
+    }
+
+    /// Reload-and-replay variant of `save(_:acceptingSystemHostsHash:)`.
+    public func save(
+        applying change: (inout ActivationModel) throws -> Void,
+        acceptingSystemHostsHash acceptedHash: String
+    ) throws -> ReplayedSaveOutcome {
+        try save(applying: change, acceptingSystemHostsHash: Optional(acceptedHash))
+    }
+
+    private func save(
+        applying change: (inout ActivationModel) throws -> Void,
+        acceptingSystemHostsHash acceptedHash: String?
+    ) throws -> ReplayedSaveOutcome {
+        guard FileManager.default.fileExists(atPath: originalBackupURL.path) else {
+            throw WorkspaceError.notInitialized
+        }
+        return try withManifestLock {
+            guard FileManager.default.fileExists(atPath: manifestURL.path) else {
+                throw WorkspaceError.notInitialized
             }
-
-            let manifest = try Manifest(
-                standaloneProfiles: model.standaloneProfiles.map(writeProfileFile),
-                groups: model.groups.map { group in
-                    try ManifestGroup(
-                        id: group.id.rawValue,
-                        name: group.name,
-                        profiles: group.profiles.map(writeProfileFile)
-                    )
-                },
-                activeProfileIDs: model.activeProfileIDs.map(\.rawValue).sorted(),
-                isPaused: model.isPaused,
-                lastWrittenHash: acceptedHash ?? priorLastWrittenHash
-            )
-            try writeManifest(manifest)
-
-            // Stale profile files are cleaned up only after the manifest is persisted — and best-effort:
-            // the manifest write is the commit point, so a cleanup failure must not turn an already
-            // committed save into a thrown one (callers that commit in-memory state only on success
-            // would diverge from disk). An unremoved stale file is unreferenced and retried next save.
-            let expectedFileNames = Set(fileNames.values.map { $0.lowercased() })
-            let leftovers = (try? FileManager.default.contentsOfDirectory(
-                at: profilesDirectory,
-                includingPropertiesForKeys: nil
-            )) ?? []
-            for url in leftovers
-            where url.pathExtension == "hosts" && !expectedFileNames.contains(url.lastPathComponent.lowercased()) {
-                try? FileManager.default.removeItem(at: url)
+            let latest = try load()
+            var updated = latest
+            do {
+                try change(&updated)
+            } catch {
+                return ReplayedSaveOutcome.conflict(latest: latest, reason: error)
             }
+            try saveLocked(updated, acceptingSystemHostsHash: acceptedHash)
+            return .saved(updated)
         }
     }
 
@@ -328,6 +388,21 @@ public struct Workspace: Sendable {
             }
         }
         return try body()
+    }
+
+    // MARK: - Cross-process change notification (ADR-0010 ③)
+
+    /// Distributed notification a writer (the CLI) posts after changing the workspace on disk so a
+    /// running GUI can refresh its display. Post with the workspace's `changeNotificationObject` as
+    /// the object and `deliverImmediately: true`. The channel is unauthenticated and unreliable —
+    /// a display-refresh optimization only: receipt may trigger a re-read of the workspace but must
+    /// never be trusted beyond that, and correctness must not depend on delivery.
+    public static let changeNotification = Notification.Name("com.heronapp.hostflip.workspace-changed")
+
+    /// The notification object identifying this workspace: observers filter on it so workspaces at
+    /// different roots do not trigger each other.
+    public var changeNotificationObject: String {
+        rootDirectory.standardizedFileURL.path
     }
 
     // MARK: - File layout
