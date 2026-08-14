@@ -46,9 +46,19 @@ private struct StubError: Error {}
 
 private final class HostsDriftMonitoringStub: HostsDriftMonitoring, @unchecked Sendable {
     private var onChange: (@MainActor @Sendable (Bool) -> Void)?
+    private let lock = NSLock()
+    private var recheckCount = 0
 
     func start(onChange: @escaping @MainActor @Sendable (Bool) -> Void) {
         self.onChange = onChange
+    }
+
+    func recheck() {
+        lock.withLock { recheckCount += 1 }
+    }
+
+    var recordedRechecks: Int {
+        lock.withLock { recheckCount }
     }
 
     @MainActor
@@ -1516,6 +1526,21 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertNil(store.followUpMergeTask)
         XCTAssertTrue(stub.authorizedMerges.isEmpty)
         XCTAssertTrue(stub.performedSwitches.isEmpty)
+    }
+
+    @MainActor
+    func testRefreshFromExternalChangeRechecksTheDriftMonitor() throws {
+        let monitor = HostsDriftMonitoringStub()
+        let store = makeStore(coordinator: SwitchCoordinatingStub(), driftMonitor: monitor)
+        foreignlyModifyWorkspace {
+            try $0.addProfile(id: .init("cli"), name: "CLI", content: "# cli\n")
+        }
+
+        store.refreshFromExternalChange()
+
+        // The external writer's hosts file event can outrun its manifest record, leaving a stale
+        // drift verdict; the change notification arrives after the record, so it re-checks.
+        XCTAssertEqual(monitor.recordedRechecks, 1)
     }
 
     @MainActor

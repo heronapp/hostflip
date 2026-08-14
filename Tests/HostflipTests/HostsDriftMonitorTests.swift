@@ -142,6 +142,40 @@ final class HostsDriftMonitorTests: XCTestCase {
         monitor.stop()
     }
 
+    func testRecheckClearsTheDriftVerdictAfterAnExternalWriterRecordsItsBaseline() async throws {
+        let initialCheck = expectation(description: "初查无漂移")
+        let falseDrift = expectation(description: "外部写入的文件事件先于其 manifest 记录，误判漂移")
+        let cleared = expectation(description: "复查读到已落盘的基线，误报解除")
+        let driftCounter = DriftCallbackCounter()
+        let nonDriftCounter = DriftCallbackCounter()
+        let monitor = HostsDriftMonitor(workspace: workspace, hostsURL: hostsURL)
+        monitor.start { hasDrift in
+            if hasDrift {
+                if driftCounter.next() == 1 { falseDrift.fulfill() }
+            } else if nonDriftCounter.next() == 1 {
+                initialCheck.fulfill()
+            } else {
+                cleared.fulfill()
+            }
+        }
+        await fulfillment(of: [initialCheck], timeout: 1)
+
+        // An external writer (the CLI) merges through the daemon: the hosts file event reaches
+        // the monitor before the writer's recordLastWrittenHash lands, so the check against the
+        // still-stale manifest reports drift.
+        let written = MergedHosts(content: "10.0.0.1 cli-written.local\n")
+        try Data(written.content.utf8).write(to: hostsURL, options: .atomic)
+        await fulfillment(of: [falseDrift], timeout: 1)
+
+        // The record lands (no further hosts file event), then the writer's change notification
+        // triggers a recheck: the fresh read sees a consistent baseline and clears the verdict.
+        try workspace.recordLastWrittenHash(written.hash)
+        monitor.recheck()
+
+        await fulfillment(of: [cleared], timeout: 1)
+        monitor.stop()
+    }
+
     func testExpectedWriteWindowNeverHidesPreexistingDrift() async throws {
         let target = MergedHosts(content: "10.0.0.1 managed.local\n")
         try Data(target.content.utf8).write(to: hostsURL, options: .atomic)

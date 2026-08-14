@@ -5,6 +5,11 @@ import HostflipXPC
 
 protocol HostsDriftMonitoring: Sendable {
     func start(onChange: @escaping @MainActor @Sendable (Bool) -> Void)
+    /// Re-evaluates drift from the on-disk state, reporting through the start callback if the
+    /// verdict changed. An external writer's hosts file event can reach the monitor before that
+    /// writer records the new baseline into the manifest — its change notification arrives after
+    /// the record, so a recheck then clears the stale verdict (ADR-0010 ③).
+    func recheck()
 }
 
 /// Watches the system hosts while the app is resident. All file descriptors and state are
@@ -47,6 +52,12 @@ final class HostsDriftMonitor:
             }
             isStarted = true
             armSource()
+            checkNow()
+        }
+    }
+
+    func recheck() {
+        queue.async { [self] in
             checkNow()
         }
     }

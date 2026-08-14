@@ -232,6 +232,10 @@ final class WorkspaceStore {
     /// edits in memory, and an in-flight switch or reconciliation commits through its own
     /// reload-and-replay — those paths reconcile with external changes at save time instead.
     func refreshFromExternalChange() {
+        // Always re-evaluate drift, even when the model refresh below is skipped: the writer's
+        // hosts file event may have outrun its manifest record, and this notification (posted
+        // after the record) is what clears the resulting stale drift verdict.
+        driftMonitor?.recheck()
         guard model != nil, saveError == nil, !isSwitching, !isReconciling else { return }
         guard let latest = try? workspace.openReadOnly() else { return }
         model = latest
