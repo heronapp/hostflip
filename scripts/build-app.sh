@@ -18,9 +18,12 @@ swift build -c release
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Library/LaunchDaemons" \
-    "$APP/Contents/Frameworks"
-cp "$BIN/Hostflip" "$APP/Contents/MacOS/Hostflip"
+    "$APP/Contents/Frameworks" "$APP/Contents/Helpers"
+cp "$BIN/HostflipApp" "$APP/Contents/MacOS/Hostflip"
 cp "$BIN/hostflipd" "$APP/Contents/MacOS/hostflipd"
+# The CLI lives in Helpers/, never MacOS/: APFS is case-insensitive by default,
+# so `hostflip` next to `Hostflip` would collide (ADR 0009).
+cp "$BIN/hostflip" "$APP/Contents/Helpers/hostflip"
 cp Packaging/HostflipApp-Info.plist "$APP/Contents/Info.plist"
 cp Packaging/Hostflip.icns "$APP/Contents/Resources/Hostflip.icns"
 cp Packaging/com.heronapp.hostflip.daemon.plist "$APP/Contents/Library/LaunchDaemons/"
@@ -47,11 +50,16 @@ codesign --force --options runtime $TIMESTAMP_FLAG \
     --sign "$IDENTITY" "$FRAMEWORK/Versions/B/Updater.app"
 codesign --force --options runtime $TIMESTAMP_FLAG --sign "$IDENTITY" "$FRAMEWORK"
 
-# Sign the embedded daemon first (displaced nested code), then the whole bundle.
-# The daemon is not a bundle, so its signing identifier must be set explicitly.
+# Sign the embedded daemon and CLI first (displaced nested code), then the whole
+# bundle. Neither is a bundle, so their signing identifiers must be set explicitly;
+# each executable carries its own identity (ADR 0009) and the daemon accepts either
+# the app's or the CLI's as its peer.
 codesign --force --options runtime $TIMESTAMP_FLAG \
     --identifier com.heronapp.hostflip.daemon \
     --sign "$IDENTITY" "$APP/Contents/MacOS/hostflipd"
+codesign --force --options runtime $TIMESTAMP_FLAG \
+    --identifier com.heronapp.hostflip.cli \
+    --sign "$IDENTITY" "$APP/Contents/Helpers/hostflip"
 codesign --force --options runtime $TIMESTAMP_FLAG --sign "$IDENTITY" "$APP"
 codesign --verify --strict "$APP"
 

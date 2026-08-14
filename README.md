@@ -25,17 +25,22 @@ Editing `/etc/hosts` by hand — or typing your password every time a hosts mana
 
 ## Install
 
+Requires macOS 14 or later on Apple silicon.
+
 **Homebrew**
 
     brew tap heronapp/tap
     brew trust heronapp/tap   # newer Homebrew requires trusting third-party taps once
     brew install --cask hostflip
 
+This installs the app and puts the bundled `hostflip` command-line tool on your PATH.
+
 **Direct download**
 
-Grab the notarized DMG from [Releases](https://github.com/heronapp/hostflip/releases/latest) and drag `Hostflip.app` into `/Applications`.
+Grab the notarized DMG from [Releases](https://github.com/heronapp/hostflip/releases/latest) and drag `Hostflip.app` into `/Applications`. To use the `hostflip` command-line tool, symlink it out of the bundle:
 
-Requires macOS 14 or later on Apple silicon.
+    sudo mkdir -p /usr/local/bin
+    sudo ln -sf /Applications/Hostflip.app/Contents/Helpers/hostflip /usr/local/bin/hostflip
 
 ## How it works
 
@@ -44,6 +49,18 @@ hostflip owns the whole `/etc/hosts` file and rewrites it atomically: Base Hosts
 The first time you actually switch something, macOS asks you to approve the helper in System Settings. That's the only prompt you will ever see.
 
 Technical deep-dives live in [`docs/`](docs/): signed-build verification, helper re-registration behavior, DNS flush measurements, and the release pipeline, all with reproducible steps.
+
+## Command line
+
+The bundle ships with a `hostflip` CLI ([Install](#install) covers how it gets on your PATH). It works on the same workspace and daemon as the app, so both can be used side by side:
+
+    hostflip status                  # pause state, active profiles, hosts drift
+    hostflip list                    # group structure, every profile with its ID
+    hostflip activate staging/api    # switch, by name or group/profile path
+    hostflip cat staging/api         # print a profile's content as stored
+    hostflip write staging/api --file ./hosts.snippet
+
+Profile names are not unique — IDs are; pass `--id` when a name is ambiguous. For scripting and agents, `--json` puts a result object on stdout and structured errors with stable string codes on stderr, and exit codes are meaningful — in particular `3` means the system hosts drifted and hostflip won't write until you reconcile in the app. `hostflip --help` lists the full command surface.
 
 ## FAQ
 

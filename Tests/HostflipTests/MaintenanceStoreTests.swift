@@ -48,7 +48,7 @@ final class MaintenanceStoreTests: XCTestCase {
 
         XCTAssertEqual(store.helperStatus, .enabled)
         guard case .helperRemovalFailed(let message) = store.feedback else {
-            return XCTFail("应保留 helper 移除失败反馈")
+            return XCTFail("the helper removal failure feedback must be kept")
         }
         XCTAssertTrue(message.contains("Try again"))
     }
@@ -68,7 +68,7 @@ final class MaintenanceStoreTests: XCTestCase {
         await store.removeHelper()
 
         let reloaded = try workspace.open(systemHosts: {
-            XCTFail("维护操作不应重新初始化工作区")
+            XCTFail("a maintenance operation must not reinitialize the workspace")
             return ""
         })
         XCTAssertEqual(reloaded.standaloneProfiles.first?.id, profileID)
@@ -114,7 +114,7 @@ final class MaintenanceStoreTests: XCTestCase {
         await helper.setStatus(.requiresApproval)
         await gate.tick()
         for _ in 0 ..< 50 { await Task.yield() }
-        XCTAssertEqual(store.helperStatus, .enabled, "轮询应在批准后停止")
+        XCTAssertEqual(store.helperStatus, .enabled, "polling must stop once approved")
     }
 
     /// Yields until the condition holds (the poll task needs a few actor hops to land).
@@ -124,7 +124,7 @@ final class MaintenanceStoreTests: XCTestCase {
             if condition() { return }
             await Task.yield()
         }
-        XCTFail("等待条件超时")
+        XCTFail("timed out waiting for the condition")
     }
 
     @MainActor

@@ -71,7 +71,7 @@ final class DaemonServiceTests: XCTestCase {
 
     func testMergeReportsWriteFailureStageFromSink() {
         let sink = SpySink()
-        let failure = HostsWriteError(stage: .flushDNS, message: "dscacheutil 退出码 1")
+        let failure = HostsWriteError(stage: .flushDNS, message: "dscacheutil exited with status 1")
         sink.failure = failure
         let service = DaemonService(sink: sink, daemonVersion: "0.1.0")
         let merged = MergedHosts(content: "127.0.0.1 localhost\n")

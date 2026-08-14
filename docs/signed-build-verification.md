@@ -18,9 +18,10 @@ closed (which is exactly what the negative verification in step 4 relies on).
     build/Hostflip.app/Contents/MacOS/Hostflip --print-requirement
     build/Hostflip.app/Contents/MacOS/hostflipd --print-requirement
 
-The Team IDs in the two requirements must match. The identifier the app
-prints is `com.heronapp.hostflip.daemon` (the peer it requires); the daemon
-prints `com.heronapp.hostflip`.
+The Team IDs in the two requirements must match. The app prints the daemon
+identifier `com.heronapp.hostflip.daemon` (the peer it requires); the daemon
+prints an alternation accepting either client identifier:
+`(identifier "com.heronapp.hostflip" or identifier "com.heronapp.hostflip.cli")`.
 
 ## 3. Channel round trip (requires sudo)
 
@@ -50,6 +51,18 @@ locations such as /tmp, failing with `Bootstrap failed: 5: Input/output error`:
     # SMAppService queries the system domain by Label: enabled while manually
     # loaded, notFound when not loaded
 
+**CLI-identifier acceptance**: the daemon also accepts a client signed with
+the CLI identifier `com.heronapp.hostflip.cli` (same Team ID). Until the
+bundled CLI binary ships, verify by re-signing a copy of the app binary with
+the CLI identifier and handshaking:
+
+    cp /Applications/Hostflip.app/Contents/MacOS/Hostflip /tmp/Hostflip-cli-id
+    codesign --force --options runtime --identifier com.heronapp.hostflip.cli \
+        --sign "Developer ID Application: <Name> (<TEAMID>)" /tmp/Hostflip-cli-id
+    /tmp/Hostflip-cli-id --handshake
+    # expected: protocolVersion=1 daemonVersion=<version> — the CLI identifier
+    # is inside the accepted pair, so the daemon keeps the connection
+
 ## 4. Negative verification (rejection in both directions)
 
 - **Unsigned app**: on an ad-hoc build, `Hostflip --handshake` should fail
@@ -58,9 +71,9 @@ locations such as /tmp, failing with `Bootstrap failed: 5: Input/output error`:
 - **Unsigned daemon**: running an ad-hoc built `hostflipd` directly should
   exit immediately (exit code 78) with a message about the unsigned build.
 - **Daemon-side rejection** (while the step 3 load is active): copy the app
-  binary out, re-sign it with the same certificate but a wrong identifier,
-  then handshake; the daemon cuts the connection and the app side reports
-  `interrupted`:
+  binary out, re-sign it with the same certificate but an identifier outside
+  the accepted app/CLI pair, then handshake; the daemon cuts the connection
+  and the app side reports `interrupted`:
 
       cp /Applications/Hostflip.app/Contents/MacOS/Hostflip /tmp/Hostflip-wrong-id
       codesign --force --options runtime --identifier com.evil.hostflip \
@@ -101,7 +114,7 @@ locations such as /tmp, failing with `Bootstrap failed: 5: Input/output error`:
         rm -rf /Applications/Hostflip.app'
     rm -f /tmp/com.heronapp.hostflip.daemon.plist \
         /tmp/com.heronapp.hostflip.wrong-daemon.plist \
-        /tmp/Hostflip-wrong-id /tmp/hostflipd-wrong-id
+        /tmp/Hostflip-wrong-id /tmp/hostflipd-wrong-id /tmp/Hostflip-cli-id
 
 ## Verification log
 
@@ -112,6 +125,17 @@ the daemon-side wrong-identifier rejection were both reproduced; the
 "handshake interruption" item was not executed separately (error mapping is
 covered by unit tests, and the daemon-side rejection path was observed in
 practice to produce `interrupted`).
+
+2026-08-14, after relaxing the daemon-side requirement to accept the app or
+CLI identifier: steps 1–2 re-run with a Developer ID certificate — the daemon
+prints the parenthesized alternation and the app's requirement is unchanged.
+Requirement semantics checked offline with `codesign --verify -R=` against
+the signed binaries: the app identifier and a copy re-signed with the CLI
+identifier both satisfy the daemon's requirement; a third identifier (the
+daemon binary) and a wrong Team ID paired with a matching identifier both
+fail — confirming the alternation is parenthesized so the Team ID constraint
+binds on every branch. The sudo-based channel round trip (steps 3–4) was not
+re-run.
 
 2026-08-07 (later the same day), follow-up test of the app-side rejection
 path added in review: the correct app handshaking with a daemon signed by

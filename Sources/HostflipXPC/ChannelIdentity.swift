@@ -5,6 +5,9 @@
 public enum ChannelIdentity {
     /// The app's bundle identifier, which is also its code-signing identifier.
     public static let appBundleID = "com.heronapp.hostflip"
+    /// The CLI's code-signing identifier (ADR 0009): its own identity, distinct from the
+    /// app's; the daemon accepts either this or the app identifier as its peer.
+    public static let cliIdentifier = "com.heronapp.hostflip.cli"
     /// The daemon's code-signing identifier, which is also the launchd Label and the Mach service name.
     public static let daemonIdentifier = "com.heronapp.hostflip.daemon"
     /// Name of the plist used for SMAppService registration (in the app bundle's Contents/Library/LaunchDaemons/).

@@ -40,6 +40,10 @@ _Avoid_: apply, sync
 The state after the master switch is turned off; only Base Hosts is written to the system hosts file, while every profile's active state is preserved.
 _Avoid_: disabled, deactivated
 
+**Resume**:
+The act of turning the master switch back on, ending the Paused state; every preserved active profile re-enters the merge.
+_Avoid_: unpause, re-enable
+
 **Dock Icon Visibility Policy**:
 Controls how the app's Dock icon is shown — "When Main Window Is Open", "Always", or "Never"; does not affect the always-visible menu bar entry.
 _Avoid_: menu-bar-only mode, menu bar switch

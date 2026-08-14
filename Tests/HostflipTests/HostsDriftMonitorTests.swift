@@ -35,8 +35,8 @@ final class HostsDriftMonitorTests: XCTestCase {
     }
 
     func testStartChecksImmediatelyAndContinuesAfterAtomicReplacement() async throws {
-        let initialCheck = expectation(description: "建立监听时立即检查")
-        let driftDetected = expectation(description: "原子替换后检测漂移")
+        let initialCheck = expectation(description: "checks immediately when the watch is armed")
+        let driftDetected = expectation(description: "detects drift after an atomic replacement")
         let monitor = HostsDriftMonitor(workspace: workspace, hostsURL: hostsURL)
         monitor.start { hasDrift in
             if hasDrift {
@@ -55,9 +55,9 @@ final class HostsDriftMonitorTests: XCTestCase {
     }
 
     func testReportsAgainWhenTheDriftedContentChanges() async throws {
-        let initialCheck = expectation(description: "初查无漂移")
-        let firstDrift = expectation(description: "发现第一版漂移")
-        let secondDrift = expectation(description: "漂移期间继续报告新现场")
+        let initialCheck = expectation(description: "no drift on the initial check")
+        let firstDrift = expectation(description: "reports the first drifted version")
+        let secondDrift = expectation(description: "keeps reporting new content while drifted")
         let counter = DriftCallbackCounter()
         let monitor = HostsDriftMonitor(workspace: workspace, hostsURL: hostsURL)
         monitor.start { hasDrift in
@@ -84,9 +84,9 @@ final class HostsDriftMonitorTests: XCTestCase {
     }
 
     func testExpectedDaemonWriteDoesNotReportDrift() async throws {
-        let initialCheck = expectation(description: "初查无漂移")
-        let writeObserved = expectation(description: "自身写入以无漂移状态通知")
-        let unexpectedDrift = expectation(description: "自身写入不应报警")
+        let initialCheck = expectation(description: "no drift on the initial check")
+        let writeObserved = expectation(description: "reports the own write as drift-free")
+        let unexpectedDrift = expectation(description: "an own write must not alert")
         unexpectedDrift.isInverted = true
         let nonDriftCounter = DriftCallbackCounter()
         let monitor = HostsDriftMonitor(workspace: workspace, hostsURL: hostsURL)
@@ -112,9 +112,9 @@ final class HostsDriftMonitorTests: XCTestCase {
     }
 
     func testConfirmedDaemonWriteDoesNotReportDriftWhenManifestRecordFails() async throws {
-        let initialCheck = expectation(description: "初查无漂移")
-        let writeObserved = expectation(description: "已确认写入以无漂移状态通知")
-        let unexpectedDrift = expectation(description: "daemon 已确认写入不应误报")
+        let initialCheck = expectation(description: "no drift on the initial check")
+        let writeObserved = expectation(description: "reports the confirmed write as drift-free")
+        let unexpectedDrift = expectation(description: "a daemon-confirmed write must not be misreported")
         unexpectedDrift.isInverted = true
         let nonDriftCounter = DriftCallbackCounter()
         let monitor = HostsDriftMonitor(workspace: workspace, hostsURL: hostsURL)
@@ -142,11 +142,77 @@ final class HostsDriftMonitorTests: XCTestCase {
         monitor.stop()
     }
 
+    func testRecheckClearsTheDriftVerdictAfterAnExternalWriterRecordsItsBaseline() async throws {
+        let initialCheck = expectation(description: "no drift on the initial check")
+        let staleDrift = expectation(description: "the file event outruns the manifest record, so the old baseline reads as drift")
+        let cleared = expectation(description: "the recheck reads the recorded baseline and clears the stale verdict")
+        let driftCounter = DriftCallbackCounter()
+        let nonDriftCounter = DriftCallbackCounter()
+        let monitor = HostsDriftMonitor(workspace: workspace, hostsURL: hostsURL)
+        monitor.start { hasDrift in
+            if hasDrift {
+                if driftCounter.next() == 1 { staleDrift.fulfill() }
+            } else if nonDriftCounter.next() == 1 {
+                initialCheck.fulfill()
+            } else {
+                cleared.fulfill()
+            }
+        }
+        await fulfillment(of: [initialCheck], timeout: 1)
+
+        // An external writer (the CLI) merges through the daemon: the hosts file event reaches
+        // the monitor before the writer's recordLastWrittenHash lands, so the check against the
+        // still-stale manifest reports drift.
+        let written = MergedHosts(content: "10.0.0.1 cli-written.local\n")
+        try Data(written.content.utf8).write(to: hostsURL, options: .atomic)
+        await fulfillment(of: [staleDrift], timeout: 1)
+
+        // The record lands (no further hosts file event), then the writer's change notification
+        // triggers a recheck: the fresh read sees a consistent baseline and clears the verdict.
+        try workspace.recordLastWrittenHash(written.hash)
+        monitor.recheck()
+
+        await fulfillment(of: [cleared], timeout: 1)
+        monitor.stop()
+    }
+
+    func testAnExternalWriteWhoseRecordLandsWithinTheConfirmationWindowNeverReportsDrift() async throws {
+        let initialCheck = expectation(description: "no drift on the initial check")
+        let refreshed = expectation(description: "the settled external write reports as a drift-free refresh")
+        let unexpectedDrift = expectation(description: "a write whose record lands within the window must not flash drift")
+        unexpectedDrift.isInverted = true
+        let nonDriftCounter = DriftCallbackCounter()
+        let monitor = HostsDriftMonitor(workspace: workspace, hostsURL: hostsURL)
+        monitor.start { hasDrift in
+            if hasDrift {
+                unexpectedDrift.fulfill()
+            } else if nonDriftCounter.next() == 1 {
+                initialCheck.fulfill()
+            } else {
+                refreshed.fulfill()
+            }
+        }
+        await fulfillment(of: [initialCheck], timeout: 1)
+
+        // The external write is noticed while the manifest is still stale (the recheck stands in
+        // for the file event, whose delivery moment is uncontrollable)...
+        let written = MergedHosts(content: "10.0.0.1 cli-written.local\n")
+        try Data(written.content.utf8).write(to: hostsURL, options: .atomic)
+        monitor.recheck()
+        // ...but the record and its change notification land within the confirmation window, so
+        // the deferred verdict dissolves instead of flashing a drift banner.
+        try workspace.recordLastWrittenHash(written.hash)
+        monitor.recheck()
+
+        await fulfillment(of: [refreshed, unexpectedDrift], timeout: 1)
+        monitor.stop()
+    }
+
     func testExpectedWriteWindowNeverHidesPreexistingDrift() async throws {
         let target = MergedHosts(content: "10.0.0.1 managed.local\n")
         try Data(target.content.utf8).write(to: hostsURL, options: .atomic)
-        let driftDetected = expectation(description: "启动时发现既有漂移")
-        let unexpectedClear = expectation(description: "预期窗口不应掩盖既有漂移")
+        let driftDetected = expectation(description: "finds the preexisting drift on start")
+        let unexpectedClear = expectation(description: "the expected-write window must not hide preexisting drift")
         unexpectedClear.isInverted = true
         let monitor = HostsDriftMonitor(workspace: workspace, hostsURL: hostsURL)
         monitor.start { hasDrift in
@@ -166,9 +232,9 @@ final class HostsDriftMonitorTests: XCTestCase {
     }
 
     func testReviewedDriftWriteTreatsOnlyTheReconciliationTargetAsExpected() async throws {
-        let initialCheck = expectation(description: "初查无漂移")
-        let driftDetected = expectation(description: "发现用户将要审阅的漂移")
-        let targetAccepted = expectation(description: "调和目标写入不再作为新漂移报告")
+        let initialCheck = expectation(description: "no drift on the initial check")
+        let driftDetected = expectation(description: "reports the drift the user is about to review")
+        let targetAccepted = expectation(description: "the reconciliation target write is not reported as new drift")
         let nonDriftCounter = DriftCallbackCounter()
         let monitor = HostsDriftMonitor(workspace: workspace, hostsURL: hostsURL)
         monitor.start { hasDrift in
@@ -199,8 +265,8 @@ final class HostsDriftMonitorTests: XCTestCase {
     }
 
     func testOverlappingExpectedWriteWindowsDoNotClearEachOther() async throws {
-        let initialCheck = expectation(description: "初查无漂移")
-        let unexpectedDrift = expectation(description: "重叠窗口不应误报")
+        let initialCheck = expectation(description: "no drift on the initial check")
+        let unexpectedDrift = expectation(description: "overlapping windows must not misreport")
         unexpectedDrift.isInverted = true
         let nonDriftCounter = DriftCallbackCounter()
         let monitor = HostsDriftMonitor(workspace: workspace, hostsURL: hostsURL)

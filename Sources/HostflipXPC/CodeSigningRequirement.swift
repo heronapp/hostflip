@@ -7,24 +7,33 @@ public enum CodeSigningRequirementError: Error, Equatable, Sendable {
 }
 
 public enum CodeSigningRequirement {
-    /// The requirement the peer must satisfy: matching signing identifier, certificate
-    /// chain anchored to Apple, matching Team ID. Inputs admit only the bundle-id
-    /// character set and a 10-character uppercase alphanumeric Team ID, ruling out
-    /// requirement syntax injection.
+    /// The requirement the peer must satisfy: one of the given signing identifiers,
+    /// certificate chain anchored to Apple, matching Team ID. Inputs admit only the
+    /// bundle-id character set and a 10-character uppercase alphanumeric Team ID,
+    /// ruling out requirement syntax injection.
     ///
     /// The form is anchor apple generic + leaf[subject.OU]: in Apple developer
     /// certificates the Team ID is bound by Apple and cannot be spoofed; tightening
     /// further by certificate class (the Developer ID OID) would also reject builds
     /// signed with development certificates, so that is left for the release pipeline
     /// (M5 #27) to evaluate.
-    public static func peerRequirement(identifier: String, teamID: String) throws -> String {
-        guard !identifier.isEmpty, identifier.allSatisfy(identifierAlphabet.contains) else {
-            throw CodeSigningRequirementError.invalidIdentifier(identifier)
+    public static func peerRequirement(identifiers: [String], teamID: String) throws -> String {
+        guard !identifiers.isEmpty else {
+            throw CodeSigningRequirementError.invalidIdentifier("")
+        }
+        for identifier in identifiers {
+            guard !identifier.isEmpty, identifier.allSatisfy(identifierAlphabet.contains) else {
+                throw CodeSigningRequirementError.invalidIdentifier(identifier)
+            }
         }
         guard teamID.count == 10, teamID.allSatisfy(teamIDAlphabet.contains) else {
             throw CodeSigningRequirementError.invalidTeamID(teamID)
         }
-        return #"identifier "\#(identifier)" and anchor apple generic and certificate leaf[subject.OU] = "\#(teamID)""#
+        let identifierClause = identifiers.map { #"identifier "\#($0)""# }.joined(separator: " or ")
+        // "or" binds looser than "and" in the requirement language, so the alternation
+        // must be parenthesized to keep the anchor/Team ID constraints on every branch.
+        let alternation = identifiers.count > 1 ? "(\(identifierClause))" : identifierClause
+        return #"\#(alternation) and anchor apple generic and certificate leaf[subject.OU] = "\#(teamID)""#
     }
 
     private static let identifierAlphabet =
@@ -39,11 +48,11 @@ public struct SigningIdentity: Sendable {
     /// Builds the peer requirement from this process's own signing identity (the peer
     /// must share this process's Team ID); an unsigned process fails closed. Both
     /// sides of the channel share this entry point.
-    public static func peerRequirement(identifier: String) throws -> String {
+    public static func peerRequirement(identifiers: [String]) throws -> String {
         guard let identity = current() else {
             throw DaemonChannelError.selfSigningUnavailable
         }
-        return try CodeSigningRequirement.peerRequirement(identifier: identifier, teamID: identity.teamID)
+        return try CodeSigningRequirement.peerRequirement(identifiers: identifiers, teamID: identity.teamID)
     }
 
     /// Reads the Team ID from the current process's signature; returns nil when

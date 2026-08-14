@@ -56,7 +56,7 @@ final class XPCPayloadsTests: XCTestCase {
     func testMergeReplyWriteFailedRoundTripCarriesStageMessageAndWrittenHash() throws {
         let failed = MergeReply.writeFailed(HostsWriteError(
             stage: .flushDNS,
-            message: "dscacheutil 退出码 1",
+            message: "dscacheutil exited with status 1",
             writtenHash: "written-hash"
         ))
 

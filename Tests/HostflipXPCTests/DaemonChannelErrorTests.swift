@@ -78,7 +78,7 @@ final class DaemonChannelErrorTests: XCTestCase {
     }
 
     func testDecodeMergeOutcomeSurfacesWriteFailureWithStage() {
-        let failure = HostsWriteError(stage: .replace, message: "重命名失败")
+        let failure = HostsWriteError(stage: .replace, message: "rename failed")
         let data = XPCPayload.encode(MergeReply.writeFailed(failure))
 
         XCTAssertThrowsError(try DaemonClient.decodeMergeOutcome(data)) { error in

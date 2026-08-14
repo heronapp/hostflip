@@ -33,7 +33,7 @@ final class MainWindowPresentationTests: XCTestCase {
         )
 
         XCTAssertTrue(presentation.activationControlsDisabled)
-        XCTAssertFalse(presentation.activationControlsDimmed, "瞬态切换不应让整列控件闪烁置灰")
+        XCTAssertFalse(presentation.activationControlsDimmed, "a transient switch must not flash the whole control column dimmed")
     }
 
     func testHostsDriftBlocksActivationAndTakesBannerPriority() {

@@ -99,14 +99,14 @@ final class MergeCoordinatorTests: XCTestCase {
     func testMergeKeepsPriorHashWhenDaemonReportsFailure() async throws {
         let prior = MergedHosts(content: "127.0.0.1 localhost\n")
         try await MergeCoordinator(workspace: workspace, send: { merged, _, _, _ in merged.hash }).merge(prior)
-        let failure = HostsWriteError(stage: .flushDNS, message: "dscacheutil 退出码 1")
+        let failure = HostsWriteError(stage: .flushDNS, message: "dscacheutil exited with status 1")
         let failing = MergeCoordinator(workspace: workspace, send: { _, _, _, _ in
             throw DaemonChannelError.mergeWriteFailed(failure)
         })
 
         do {
             try await failing.merge(MergedHosts(content: "2.2.2.2 b\n"))
-            XCTFail("失败的合并写入不应正常返回")
+            XCTFail("a failed merge write must not return normally")
         } catch let error as DaemonChannelError {
             XCTAssertEqual(error, .mergeWriteFailed(failure))
         }
@@ -119,7 +119,7 @@ final class MergeCoordinatorTests: XCTestCase {
         let tracker = ConfirmedWriteTrackerSpy(overrideHash: prior.hash)
         let failure = HostsWriteError(
             stage: .flushDNS,
-            message: "dscacheutil 退出码 1",
+            message: "dscacheutil exited with status 1",
             writtenHash: merged.hash
         )
         let coordinator = MergeCoordinator(
@@ -130,7 +130,7 @@ final class MergeCoordinatorTests: XCTestCase {
 
         do {
             try await coordinator.merge(merged)
-            XCTFail("DNS 刷新失败应上抛")
+            XCTFail("a DNS flush failure must be rethrown")
         } catch let error as DaemonChannelError {
             XCTAssertEqual(error, .mergeWriteFailed(failure))
         }
@@ -157,7 +157,7 @@ final class MergeCoordinatorTests: XCTestCase {
 
         do {
             try await coordinator.merge(merged)
-            XCTFail("manifest 记录失败应上抛")
+            XCTFail("a manifest record failure must be rethrown")
         } catch let error as WorkspaceError {
             XCTAssertEqual(error, .notInitialized)
         }

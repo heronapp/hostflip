@@ -106,6 +106,16 @@ final class WorkspaceStore {
     /// workspace persistence is not yet confirmed, keep blocking new writes even if the
     /// monitor briefly reports no drift.
     private var reconciliationNeedsAttention = false
+    /// DistributedNotificationCenter observer token for external workspace-change signals
+    /// (ADR-0010 ③); registered by the production initializer only. Not observation state, and
+    /// nonisolated(unsafe) because the nonisolated deinit reads it — it is written only once.
+    @ObservationIgnored nonisolated(unsafe) private var externalChangeObserver: (any NSObjectProtocol)?
+
+    deinit {
+        if let externalChangeObserver {
+            DistributedNotificationCenter.default().removeObserver(externalChangeObserver)
+        }
+    }
 
     convenience init(registrar: DaemonRegistrar) {
         let workspace = Workspace(rootDirectory: Workspace.defaultRootDirectory)
@@ -126,6 +136,7 @@ final class WorkspaceStore {
             driftMonitor: driftMonitor,
             readSystemHosts: { try Data(contentsOf: hostsURL) }
         )
+        observeExternalWorkspaceChanges()
     }
 
     /// Injection seam: tests substitute a temporary workspace + a coordinator stub for real XPC.
@@ -197,6 +208,39 @@ final class WorkspaceStore {
         } catch {
             systemHostsContent = nil
             systemHostsReadError = "Cannot read /etc/hosts: \(error)"
+        }
+    }
+
+    /// Subscribes to the external writers' change signal (ADR-0010 ③), filtered to this
+    /// workspace. Production wiring only: tests drive refreshFromExternalChange directly.
+    private func observeExternalWorkspaceChanges() {
+        let refresh: @MainActor @Sendable () -> Void = { [weak self] in
+            self?.refreshFromExternalChange()
+        }
+        externalChangeObserver = DistributedNotificationCenter.default().addObserver(
+            forName: Workspace.changeNotification,
+            object: workspace.changeNotificationObject,
+            queue: .main
+        ) { _ in
+            MainActor.assumeIsolated(refresh)
+        }
+    }
+
+    /// Re-reads the workspace after an external writer announced a change (ADR-0010 ③) and
+    /// refreshes the display; the notification is untrusted, so receipt only ever triggers this
+    /// re-read. Skipped whenever local state may diverge from disk — a failed save keeps unsaved
+    /// edits in memory, and an in-flight switch or reconciliation commits through its own
+    /// reload-and-replay — those paths reconcile with external changes at save time instead.
+    func refreshFromExternalChange() {
+        // Always re-evaluate drift, even when the model refresh below is skipped: the writer's
+        // hosts file event may have outrun its manifest record, and this notification (posted
+        // after the record) is what clears the resulting stale drift verdict.
+        driftMonitor?.recheck()
+        guard model != nil, saveError == nil, !isSwitching, !isReconciling else { return }
+        guard let latest = try? workspace.openReadOnly() else { return }
+        model = latest
+        if hasHostsDrift {
+            refreshHostsDriftComparison()
         }
     }
 
@@ -468,27 +512,25 @@ final class WorkspaceStore {
         return preview
     }
 
-    /// The merge has succeeded: replay this change on the latest model and persist it. The system
-    /// hosts is already updated at this point, so a save failure only affects the manifest — the
-    /// feedback is still a successful switch, with the save error reported separately.
+    /// The merge has succeeded: commit this change by replaying it on the latest persisted state —
+    /// neither edits saved while the switch was in flight nor an external writer's changes are
+    /// rolled back (ADR-0010 ②). The system hosts is already updated at this point, so a save
+    /// failure only affects the manifest — the feedback is still a successful switch, with the
+    /// save error reported separately.
     /// A follow-up merge is scheduled at the end: if in-flight edits were queued ahead of this
     /// switch, it converges the latest content into the system hosts; when the content matches,
     /// the daemon short-circuits idempotently and no extra write happens.
     private func commitSwitched(_ change: (inout ActivationModel) throws -> Void) {
         defer { scheduleFollowUpMerge() }
-        guard var current = model else { return }
         do {
-            try change(&current)
-        } catch {
-            // Replay conflict (e.g. the profile was deleted mid-flight): do not commit; the follow-up merge converges the system hosts back to the current model
-            return
-        }
-        model = current
-        do {
-            try workspace.save(current)
-            saveError = nil
+            guard case .saved = try persistByReplaying(change) else {
+                // Replay conflict (e.g. the profile was deleted mid-flight): do not commit; the
+                // follow-up merge converges the system hosts back to the current model
+                return
+            }
             backgroundSyncError = nil
         } catch {
+            // The change stays committed in memory (persistByReplaying); only the disk write failed
             saveError = "Save failed: \(error)"
         }
         switchFeedback = .merged
@@ -514,17 +556,23 @@ final class WorkspaceStore {
               var updated = model else { return }
         let reviewedGeneration = hostsDriftGeneration
 
+        // The reviewed change in replayable form: replayed on the latest persisted state at commit
+        // time (ADR-0010 ②), so profile and active-state changes made while the reconcile is in
+        // flight are not rolled back. The base content is deliberately the snapshot value computed
+        // at review time — it is exactly what this reconcile writes into the system hosts, and the
+        // CLI (the only external writer) has no command that edits Base Hosts.
+        let change: (inout ActivationModel) -> Void
         switch choice {
         case .addDriftLinesToBaseHosts:
-            updated.baseHosts.content = comparison.appendingDriftAdditions(
-                to: updated.baseHosts.content
-            )
+            let reviewedBase = comparison.appendingDriftAdditions(to: updated.baseHosts.content)
+            change = { $0.baseHosts.content = reviewedBase }
         case .overwriteDriftWithActiveState:
-            break
+            change = { _ in }
         case .later:
             reconciliationTask = nil
             return
         }
+        change(&updated)
 
         followUpMergeTask?.cancel()
         isReconciling = true
@@ -540,7 +588,7 @@ final class WorkspaceStore {
                 switch outcome.guidance(targetHash: updated.mergedHosts.hash) {
                 case .merged:
                     guard reconciliationSnapshotIsCurrent(reviewedGeneration),
-                          persistReconciledModel(updated) else { return }
+                          persistReconciledModel(applying: change) else { return }
                     hasHostsDrift = false
                     hostsDriftComparison = nil
                     reconciliationError = nil
@@ -556,7 +604,7 @@ final class WorkspaceStore {
                     // user's choice about the drifted content must be saved now, or the next
                     // normal write would overwrite the preserved lines.
                     guard reconciliationSnapshotIsCurrent(reviewedGeneration),
-                          persistReconciledModel(updated, writtenHash: failure.writtenHash)
+                          persistReconciledModel(applying: change, writtenHash: failure.writtenHash)
                     else { return }
                     hasHostsDrift = false
                     hostsDriftComparison = nil
@@ -604,7 +652,7 @@ final class WorkspaceStore {
     func useSystemHostsAsBase() {
         guard useSystemHostsAsBaseUnavailableReason == nil,
               let comparison = hostsDriftComparison,
-              var updated = model else { return }
+              model != nil else { return }
 
         followUpMergeTask?.cancel()
         followUpMergeTask = nil
@@ -625,9 +673,13 @@ final class WorkspaceStore {
                 return
             }
 
-            updated.baseHosts.content = latestContent
-            try workspace.save(updated, acceptingSystemHostsHash: latestHash)
-            model = updated
+            guard case .saved = try persistByReplaying(
+                { $0.baseHosts.content = latestContent },
+                acceptingSystemHostsHash: latestHash
+            ) else {
+                assertionFailure("a non-throwing base replacement cannot conflict")
+                return
+            }
             systemHostsContent = latestContent
             systemHostsReadError = nil
             reconciliationNeedsAttention = false
@@ -657,12 +709,14 @@ final class WorkspaceStore {
     }
 
     private func persistReconciledModel(
-        _ updated: ActivationModel,
+        applying change: (inout ActivationModel) -> Void,
         writtenHash: String? = nil
     ) -> Bool {
-        model = updated
         do {
-            try workspace.save(updated)
+            guard case .saved = try persistByReplaying(change) else {
+                assertionFailure("a non-throwing reconciliation change cannot conflict")
+                return false
+            }
             if let writtenHash {
                 try workspace.recordLastWrittenHash(writtenHash)
             }
@@ -671,6 +725,7 @@ final class WorkspaceStore {
             backgroundSyncError = nil
             return true
         } catch {
+            // The change stays committed in memory (persistByReplaying); only the disk write failed
             saveError = "Save failed: \(error)"
             reconciliationNeedsAttention = true
             hasHostsDrift = true
@@ -700,7 +755,7 @@ final class WorkspaceStore {
     /// through applyEdit, whose follow-up merge would touch the system hosts. The in-memory model
     /// is committed only after the workspace save succeeds.
     func importFiles(at urls: [URL]) -> ImportOutcome {
-        guard var updated = model else {
+        guard model != nil else {
             return .failed("Nothing was imported: the workspace is not loaded.")
         }
         do {
@@ -714,16 +769,35 @@ final class WorkspaceStore {
                     throw ImportFileFailure(fileName: url.lastPathComponent, underlying: error)
                 }
             }
-            for content in contents {
-                switch content {
-                case .snapshot(let snapshot):
-                    try updated.importSnapshot(snapshot)
-                case .plainText(let name, let text):
-                    try updated.addProfile(id: Profile.ID(UUID().uuidString), name: name, content: text)
+            let applyImports: (inout ActivationModel) throws -> Void = { updated in
+                for content in contents {
+                    switch content {
+                    case .snapshot(let snapshot):
+                        try updated.importSnapshot(snapshot)
+                    case .plainText(let name, let text):
+                        try updated.addProfile(id: Profile.ID(UUID().uuidString), name: name, content: text)
+                    }
                 }
             }
-            try workspace.save(updated)
-            model = updated
+            // Imports commit only when the save succeeds, so this path stays off persistByReplaying,
+            // whose disk-failure fallback would keep the imported content in memory.
+            if saveError == nil {
+                switch try workspace.save(applying: applyImports) {
+                case .saved(let saved):
+                    model = saved
+                case .conflict(let latest, let reason):
+                    model = latest
+                    throw reason
+                }
+            } else {
+                guard var updated = model else {
+                    return .failed("Nothing was imported: the workspace is not loaded.")
+                }
+                try applyImports(&updated)
+                try workspace.save(updated)
+                model = updated
+                saveError = nil
+            }
             return .imported
         } catch {
             return .failed(Self.importFailureMessage(for: error))
@@ -763,31 +837,80 @@ final class WorkspaceStore {
 
     // MARK: - Persisting and follow-up merging
 
-    /// Shared path for edit-type changes: mutate the in-memory model → save to disk synchronously → schedule a follow-up merge.
+    /// Shared path for edit-type changes: persist the edit synchronously by replaying it on the
+    /// latest state (persistByReplaying) → schedule a follow-up merge.
     private func applyEdit(_ edit: (inout ActivationModel) throws -> Void) {
-        guard var updated = model else { return }
+        guard model != nil else { return }
         // Every new edit first cancels the old follow-up merge: its content is stale. This must
         // happen before saving — if the save fails and returns early, a late success from the old
         // task must not clear this save error
         followUpMergeTask?.cancel()
-        do {
-            try edit(&updated)
-        } catch {
-            assertionFailure("Failed to apply the edit to the current model: \(error)")
-            return
-        }
-        model = updated
-        if hasHostsDrift {
-            refreshHostsDriftComparison()
+        // The comparison derives from the model; recompute it once the model reaches its final
+        // state on every exit path (a failed save keeps the edit in memory)
+        defer {
+            if hasHostsDrift {
+                refreshHostsDriftComparison()
+            }
         }
         do {
-            try workspace.save(updated)
-            saveError = nil
+            guard case .saved = try persistByReplaying(edit) else {
+                // The edit's target no longer exists on disk (an external writer removed it):
+                // the edit is dropped and the model now shows the latest state
+                return
+            }
         } catch {
             saveError = "Save failed: \(error)"
             return
         }
         scheduleFollowUpMerge()
+    }
+
+    /// ADR-0010 ② for every GUI save: replays `change` on the latest on-disk state under the
+    /// manifest lock, so changes an external writer made since the last load survive the save.
+    /// Two deliberate departures:
+    /// - Degraded mode: while an earlier save failure keeps unsaved edits in the in-memory model
+    ///   (saveError != nil), the replay target is that model and it is written whole, so the
+    ///   unsaved edits self-heal on the next successful save instead of being dropped by a reload.
+    /// - Disk failure: the change is still committed to the in-memory model — the user's edit must
+    ///   not vanish while the disk is unwritable — before rethrowing for the caller to report.
+    /// On .saved the in-memory model equals the persisted state; on .conflict nothing was written
+    /// and the in-memory model shows the latest on-disk state, which lacks the change's target.
+    private func persistByReplaying(
+        _ change: (inout ActivationModel) throws -> Void,
+        acceptingSystemHostsHash acceptedHash: String? = nil
+    ) throws -> Workspace.ReplayedSaveOutcome {
+        if saveError != nil {
+            guard var current = model else { throw WorkspaceError.notInitialized }
+            try change(&current)
+            model = current
+            if let acceptedHash {
+                try workspace.save(current, acceptingSystemHostsHash: acceptedHash)
+            } else {
+                try workspace.save(current)
+            }
+            saveError = nil
+            return .saved(current)
+        }
+        let outcome: Workspace.ReplayedSaveOutcome
+        do {
+            if let acceptedHash {
+                outcome = try workspace.save(applying: change, acceptingSystemHostsHash: acceptedHash)
+            } else {
+                outcome = try workspace.save(applying: change)
+            }
+        } catch {
+            if var current = model, (try? change(&current)) != nil {
+                model = current
+            }
+            throw error
+        }
+        switch outcome {
+        case .saved(let saved):
+            model = saved
+        case .conflict(let latest, _):
+            model = latest
+        }
+        return outcome
     }
 
     /// Converges with one merge 800ms after typing stops; stale schedules were already cancelled
