@@ -34,6 +34,11 @@ enum ProfileResolver {
 
     enum Failure: Error, Equatable {
         case notFound(reference: String)
+        /// The reference matched no name or path but is exactly some profile's unique ID: the
+        /// caller pasted an ID (e.g. from an ambiguity listing) positionally, and the error
+        /// must point at `--id` instead of a bare not-found. Name matching always wins first —
+        /// names are arbitrary strings, so this fires only when nothing is named that way.
+        case idPassedAsName(reference: String)
         case ambiguous(reference: String, candidates: [Candidate])
     }
 
@@ -60,6 +65,10 @@ enum ProfileResolver {
             }
         }
         guard let match = matches.first else {
+            if case .nameOrPath = reference,
+               entries(in: model).contains(where: { $0.profile.id.rawValue == raw }) {
+                throw Failure.idPassedAsName(reference: raw)
+            }
             throw Failure.notFound(reference: raw)
         }
         guard matches.count == 1 else {

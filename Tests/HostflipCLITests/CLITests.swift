@@ -246,6 +246,26 @@ final class CLITests: XCTestCase {
         XCTAssertNil(details["candidates"])
     }
 
+    func testCatWithAnIDPastedAsANameHintsAtTheIDOption() async throws {
+        try makeInitializedWorkspace()
+
+        let result = await invoke("cat", "dev-id")
+
+        XCTAssertEqual(result.exitCode, .notFound)
+        XCTAssertTrue(result.standardError.contains("'dev-id' is a profile ID, not a profile name; use --id dev-id"))
+    }
+
+    func testTheIDPastedAsANameJSONErrorKeepsTheNotFoundCode() async throws {
+        try makeInitializedWorkspace()
+
+        let result = await invoke("--json", "cat", "dev-id")
+
+        XCTAssertEqual(result.exitCode, .notFound)
+        let details = try XCTUnwrap(try jsonObject(result.standardError)["error"] as? [String: Any])
+        // The string code is the machine contract and stays stable; only the human message hints.
+        XCTAssertEqual(details["code"] as? String, "profile-not-found")
+    }
+
     func testCatAmbiguousReferenceListsEveryCandidateWithItsID() async throws {
         try makeAmbiguousWorkspace()
 

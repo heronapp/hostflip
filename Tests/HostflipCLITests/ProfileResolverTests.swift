@@ -40,6 +40,32 @@ final class ProfileResolverTests: XCTestCase {
         }
     }
 
+    func testAnIDPastedAsANameFailsWithTheDedicatedHint() throws {
+        let model = try makeModel(
+            standalone: [("solo-id", "Solo")],
+            groups: [("work-id", "Work", [("dev-id", "Dev")])]
+        )
+
+        // The ambiguity listing shows IDs, so pasting one positionally is the natural next
+        // mistake; it must point at --id instead of a bare not-found.
+        XCTAssertThrowsError(try ProfileResolver.resolve(.nameOrPath("dev-id"), in: model)) {
+            XCTAssertEqual($0 as? ProfileResolver.Failure, .idPassedAsName(reference: "dev-id"))
+        }
+    }
+
+    func testANameThatLooksLikeAnotherProfilesIDStillResolvesAsAName() throws {
+        let model = try makeModel(
+            standalone: [("solo-id", "dev-id")],
+            groups: [("work-id", "Work", [("dev-id", "Dev")])]
+        )
+
+        // Names are arbitrary strings: name matching always wins, the ID hint only fires
+        // when the reference matches no name at all.
+        let match = try ProfileResolver.resolve(.nameOrPath("dev-id"), in: model)
+
+        XCTAssertEqual(match.profile.id.rawValue, "solo-id")
+    }
+
     // MARK: - Ambiguity
 
     func testCrossGroupDuplicateNamesFailWithEveryCandidateInModelOrder() throws {

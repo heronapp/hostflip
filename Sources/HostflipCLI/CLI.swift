@@ -203,6 +203,12 @@ enum CLI {
                 message: "no profile matches '\(reference)'",
                 exitCode: .notFound
             )
+        case ProfileResolver.Failure.idPassedAsName(let reference):
+            return CLIError(
+                code: "profile-not-found",
+                message: "'\(reference)' is a profile ID, not a profile name; use --id \(reference)",
+                exitCode: .notFound
+            )
         case ProfileResolver.Failure.ambiguous(let reference, let candidates):
             return CLIError(
                 code: "profile-ambiguous",
