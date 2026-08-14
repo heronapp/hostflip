@@ -53,6 +53,13 @@ struct ApplicationSettingsView: View {
                     Label("Helper", systemImage: "gearshape.2")
                 }
 
+            CLIInstallSection()
+                .padding(20)
+                .frame(width: 460, height: 250, alignment: .topLeading)
+                .tabItem {
+                    Label("Command Line", systemImage: "terminal")
+                }
+
             UpdatesSettingsView(updater: updater)
                 .padding(20)
                 .frame(width: 460, height: 190)
