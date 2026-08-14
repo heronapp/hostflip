@@ -26,6 +26,13 @@ if ! grep -q "^  auto_updates true$" "$CASK"; then
     sed -i '' "s|^  sha256 \"$SHA256\"$|  sha256 \"$SHA256\"\n\n  auto_updates true|" "$CASK"
     grep -q "^  auto_updates true$" "$CASK" || { echo "error: cask auto_updates insert failed" >&2; exit 1; }
 fi
+# Link the bundled CLI onto PATH. Inserted here, not pre-seeded in the cask: brew fails the
+# whole install when a binary stanza's source is missing, so the stanza must never point at
+# a shipped DMG that predates the CLI (0.1.6 and earlier).
+if ! grep -q "^  binary " "$CASK"; then
+    sed -i '' "s|^  app \"Hostflip.app\"$|  app \"Hostflip.app\"\n  binary \"#{appdir}/Hostflip.app/Contents/Helpers/hostflip\"|" "$CASK"
+    grep -q "^  binary \"#{appdir}/Hostflip.app/Contents/Helpers/hostflip\"$" "$CASK" || { echo "error: cask binary stanza insert failed" >&2; exit 1; }
+fi
 
 # Commit as the GitHub noreply identity, so the machine's global git config
 # email never leaks into the public tap.
