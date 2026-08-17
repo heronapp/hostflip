@@ -103,13 +103,13 @@ private struct MenuBarLabel: View {
         // universal across languages.
         switch (store.isPaused, store.hasHostsDrift) {
         case (false, false):
-            String(localized: "Hostflip")
+            String(localized: "hostflip")
         case (true, false):
-            String(localized: "Hostflip, paused")
+            String(localized: "hostflip, paused")
         case (false, true):
-            String(localized: "Hostflip, hosts drift detected")
+            String(localized: "hostflip, hosts drift detected")
         case (true, true):
-            String(localized: "Hostflip, paused, hosts drift detected")
+            String(localized: "hostflip, paused, hosts drift detected")
         }
     }
 }
