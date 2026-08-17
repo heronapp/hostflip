@@ -29,7 +29,7 @@ The current content of the real `/etc/hosts`; shown live and read-only in the ma
 _Avoid_: Base Hosts
 
 **Active**:
-The state of a profile that is selected and participates in the merge.
+The state of a profile that is selected for the merge; it participates whenever hostflip is not Paused, and the selection is preserved — but not applied — while Paused.
 _Avoid_: enabled, turned on
 
 **Merge**:
