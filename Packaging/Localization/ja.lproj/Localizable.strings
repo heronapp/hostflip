@@ -1,0 +1,206 @@
+/* Menu bar */
+"Enable hostflip" = "hostflip を有効にする";
+"Hosts file changed externally — Review…" = "hosts ファイルが外部で変更されました — 確認…";
+"No profiles yet — create one…" = "プロファイルがまだありません — 作成…";
+"Open hostflip…" = "hostflip を開く…";
+"Settings…" = "設定…";
+"Quit hostflip" = "hostflip を終了";
+"hostflip" = "hostflip";
+"hostflip, paused" = "hostflip、一時停止中";
+"hostflip, hosts drift detected" = "hostflip、外部変更を検出";
+"hostflip, paused, hosts drift detected" = "hostflip、一時停止中、外部変更を検出";
+
+/* Shared buttons */
+"Open System Settings…" = "システム設定を開く…";
+"Later" = "後で";
+"OK" = "OK";
+"Retry" = "再試行";
+"Delete" = "削除";
+
+/* Settings window */
+"General" = "一般";
+"Helper" = "ヘルパー";
+"Command Line" = "コマンドライン";
+"Updates" = "アップデート";
+"Appearance" = "外観";
+"Auto follows the system appearance." = "「自動」はシステムの外観に従います。";
+"Language" = "言語";
+"System" = "システムデフォルト";
+"Takes effect after relaunching hostflip." = "hostflip の再起動後に有効になります。";
+"Relaunch Now" = "今すぐ再起動";
+"Show Dock Icon" = "Dock アイコンを表示";
+"The menu bar icon is always shown." = "メニューバーアイコンは常に表示されます。";
+"Launch at Login" = "ログイン時に起動";
+"hostflip starts silently in the menu bar when you log in." = "ログインすると、hostflip はウインドウを表示せずにメニューバーで起動します。";
+"Current Version" = "現在のバージョン";
+"Automatically check for updates" = "アップデートを自動的に確認";
+"Check for Updates" = "アップデートを確認";
+"Auto" = "自動";
+"Light" = "ライト";
+"Dark" = "ダーク";
+"When Main Window Is Open" = "メインウインドウを開いている間";
+"Always" = "常に";
+"Never" = "しない";
+
+/* Sidebar and creation */
+"System Hosts" = "システム hosts";
+"Base Hosts" = "ベース hosts";
+"Standalone Profiles" = "グループ外のプロファイル";
+"Drag to Move" = "ドラッグして移動";
+"Drag to move" = "ドラッグして移動";
+"No Profiles Yet" = "プロファイルはまだありません";
+"Create a profile to switch hosts without changing Base Hosts." = "プロファイルを作成すると、ベース hosts を変更せずに hosts を切り替えられます。";
+"Create Profile" = "プロファイルを作成";
+"New" = "新規";
+"New Profile" = "新規プロファイル";
+"New Group" = "新規グループ";
+"PROFILE_DEFAULT_NAME" = "新規プロファイル";
+"PROFILE_DEFAULT_NAME_NUMBERED" = "新規プロファイル %lld";
+"GROUP_DEFAULT_NAME" = "新規グループ";
+"GROUP_DEFAULT_NAME_NUMBERED" = "新規グループ %lld";
+"Group Name" = "グループ名";
+"Rename Group…" = "グループの名前を変更…";
+"Move Up" = "上に移動";
+"Move Down" = "下に移動";
+"Delete Group…" = "グループを削除…";
+"Rename Profile…" = "プロファイルの名前を変更…";
+"Move To" = "移動先";
+"Delete Profile…" = "プロファイルを削除…";
+"Profile Actions" = "プロファイルの操作";
+"Group Actions" = "グループの操作";
+"Actions for %@" = "%@ の操作";
+"Expand %@" = "%@ を展開";
+"Collapse %@" = "%@ を折りたたむ";
+"Expand Group" = "グループを展開";
+"Collapse Group" = "グループを折りたたむ";
+"Select for editing. Drag to move." = "選択して編集。ドラッグして移動。";
+"Activate %@" = "%@ を適用する";
+"Deactivate %@" = "%@ の適用を解除する";
+"Active" = "適用中";
+"Inactive" = "未適用";
+"Saved Active" = "選択済み（一時停止中）";
+"Make Active" = "適用する";
+"Delete Profile" = "プロファイルを削除";
+"Group: %@ · One profile active at a time" = "グループ: %@ · 同時に適用できるのは 1 つのプロファイルのみ";
+"Standalone profile · Toggles independently" = "グループ外のプロファイル · 個別に切り替え";
+
+/* Delete confirmations */
+"Delete “%@”?" = "「%@」を削除しますか？";
+"The profile’s content will be removed. Base hosts and other profiles are not affected." = "このプロファイルの内容は削除されます。ベース hosts とほかのプロファイルには影響しません。";
+"Delete Group" = "グループを削除";
+"The empty group will be deleted. Base hosts and other groups are not affected." = "この空のグループは削除されます。ベース hosts とほかのグループには影響しません。";
+"Its profile will move to Standalone Profiles. Its content and active state will be preserved. Base hosts and other groups are not affected." = "グループ内のプロファイルはグループ外のプロファイルへ移動します。内容と適用状態は保持されます。ベース hosts とほかのグループには影響しません。";
+"Its %lld profiles will move to Standalone Profiles in the current order. Their content and active state will be preserved. Base hosts and other groups are not affected." = "グループ内の %lld 個のプロファイルは現在の順序のままグループ外のプロファイルへ移動します。内容と適用状態は保持されます。ベース hosts とほかのグループには影響しません。";
+
+/* Banner and drift review */
+"Paused — selections are saved but not applied to the system hosts file." = "一時停止中 — 選択は保存されていますが、システム hosts ファイルには適用されません。";
+"System hosts changed outside hostflip. Review the drift to continue switching." = "システム hosts が hostflip の外部で変更されました。切り替えを続けるには外部変更を確認してください。";
+"Review Drift" = "外部変更を確認";
+"Helper approval is required before switching profiles." = "プロファイルを切り替えるには、先にヘルパーの承認が必要です。";
+"Dismiss Status" = "ステータスを閉じる";
+"Review Hosts Drift" = "hosts の外部変更を確認";
+"Review what changed outside hostflip before switching profiles again." = "再度切り替える前に、hostflip の外部で行われた変更を確認してください。";
+"+%lld in system hosts" = "システム hosts に %lld 行追加";
+"−%lld expected" = "想定より %lld 行不足";
+"Recommended: add drifted lines to Base Hosts so they are preserved. Discarding replaces the system file with hostflip’s active state." = "推奨: 外部から追加された行をベース hosts に追加して保持します。破棄すると、システム hosts ファイルは hostflip の現在の適用状態で置き換えられます。";
+"Diff Unavailable" = "差分を表示できません";
+"hostflip could not read the current system hosts file." = "hostflip は現在のシステム hosts ファイルを読み込めませんでした。";
+"Reconciling…" = "外部変更を処理中…";
+"Use System Hosts as Base…" = "システム hosts をベースとして使用…";
+"Use System Hosts as Base" = "システム hosts をベースとして使用";
+"Use the current System Hosts as Base Hosts?" = "現在のシステム hosts をベース hosts として使用しますか？";
+"Discard Drift" = "外部変更を破棄";
+"Add to Base Hosts" = "ベース hosts に追加";
+"This replaces the current Base Hosts without creating an undo copy. The original hosts.orig backup and /etc/hosts will not be changed." = "この操作は現在のベース hosts を置き換えます。取り消し用のコピーは作成されません。元の hosts.orig バックアップと /etc/hosts は変更されません。";
+
+/* Editor panes */
+"/etc/hosts · Read Only" = "/etc/hosts · 読み出しのみ";
+"Cannot Read System Hosts" = "システム hosts を読み込めません";
+"The current /etc/hosts content is unavailable." = "現在の /etc/hosts の内容を取得できません。";
+"Protected · Read Only" = "保護済み · 読み出しのみ";
+"Always Active" = "常に適用";
+"Profile Name" = "プロファイル名";
+"Open Maintenance" = "メンテナンスを開く";
+
+/* Switch feedback */
+"System Hosts Updated" = "システム hosts を更新しました";
+"Base Hosts Replaced" = "ベース hosts を置き換えました";
+"Approval Required" = "承認が必要";
+"Helper Unavailable" = "ヘルパーを利用できません";
+"Hosts Drift Detected" = "外部変更を検出";
+"Switch Failed" = "切り替えに失敗";
+"System hosts file updated" = "システム hosts ファイルを更新しました";
+"Base Hosts replaced with the current /etc/hosts content. The system file was not changed." = "ベース hosts を現在の /etc/hosts の内容で置き換えました。システムファイル自体は変更されていません。";
+"Switch blocked: hostflip’s background helper needs system approval" = "切り替えはブロックされました: hostflip のバックグラウンドヘルパーにはシステムの承認が必要です";
+"Helper unavailable: move the app to the Applications folder and reopen it" = "ヘルパーを利用できません: アプリを「アプリケーション」フォルダに移動してから開き直してください";
+"Switch blocked: system hosts contains changes made outside hostflip" = "切り替えはブロックされました: システム hosts に hostflip の外部で行われた変更が含まれています";
+
+/* Workspace errors */
+"Cannot open workspace: %@" = "ワークスペースを開けません: %@";
+"Cannot display /etc/hosts because it is not valid UTF-8." = "/etc/hosts は有効な UTF-8 ではないため表示できません。";
+"Cannot read /etc/hosts: %@" = "/etc/hosts を読み込めません: %@";
+"System hosts was updated, but DNS refresh failed: %@" = "システム hosts は更新されましたが、DNS の更新に失敗しました: %@";
+"Failed to update the system hosts file: %@" = "システム hosts ファイルの更新に失敗しました: %@";
+"Switch failed: %@" = "切り替えに失敗しました: %@";
+"Save failed: %@" = "保存に失敗しました: %@";
+"System hosts changed again. Review the latest diff before retrying." = "システム hosts が再び変更されました。最新の差分を確認してから再試行してください。";
+"Failed to reconcile the system hosts file: %@" = "システム hosts ファイルの外部変更を処理できませんでした: %@";
+"Hosts reconciliation failed: %@" = "hosts の外部変更の処理に失敗しました: %@";
+"Wait for the current hosts operation to finish." = "現在の hosts 操作が完了するまでお待ちください。";
+"No unresolved hosts drift is available to adopt." = "採用できる未処理の外部変更はありません。";
+"Deactivate every active profile before using System Hosts as Base Hosts." = "システム hosts をベース hosts として使用する前に、すべてのプロファイルの適用を解除してください。";
+"System Hosts must be valid UTF-8 before it can replace Base Hosts." = "ベース hosts を置き換えるには、システム hosts が有効な UTF-8 である必要があります。";
+"System Hosts already contains hostflip-generated sections and cannot be used as Base Hosts." = "システム hosts にはすでに hostflip が生成したセクションが含まれているため、ベース hosts として使用できません。";
+"Base Hosts could not be replaced: %@" = "ベース hosts を置き換えられませんでした: %@";
+"System hosts changed while reconciliation was in progress. Review the latest diff before retrying." = "外部変更の処理中にシステム hosts が変更されました。最新の差分を確認してから再試行してください。";
+"System hosts was updated, but the reconciliation could not be saved: %@" = "システム hosts は更新されましたが、外部変更の処理結果を保存できませんでした: %@";
+"Changes were saved locally, but the system hosts file could not be updated: %@" = "変更はローカルに保存されましたが、システム hosts ファイルを更新できませんでした: %@";
+"Changes were saved locally, but this build is not properly signed, so the system hosts file could not be updated." = "変更はローカルに保存されましたが、このビルドは正しく署名されていないため、システム hosts ファイルを更新できませんでした。";
+
+/* Import / export */
+"Import…" = "読み込む…";
+"Export…" = "書き出す…";
+"Import Failed" = "読み込みに失敗";
+"Export Failed" = "書き出しに失敗";
+"Nothing was exported: %@" = "何も書き出されませんでした: %@";
+"Nothing was imported: the workspace is not loaded." = "何も読み込まれませんでした: ワークスペースがまだ開かれていません。";
+"Nothing was imported: %@" = "何も読み込まれませんでした: %@";
+"this file was created by a newer version of hostflip (format version %lld)" = "このファイルは、現在使用している hostflip より新しいバージョンで作成されました（フォーマットバージョン %lld）";
+"this file is JSON but not a valid hostflip export" = "このファイルは JSON ですが、有効な hostflip の書き出しファイルではありません";
+"the export contains a profile or group with an empty name" = "書き出し内容に名前が空のプロファイルまたはグループが含まれています";
+"this file is not UTF-8 text" = "このファイルは UTF-8 テキストではありません";
+"Nothing was imported. %@: %@." = "何も読み込まれませんでした。%@: %@。";
+
+/* Helper maintenance */
+"Helper Ready" = "ヘルパーは準備完了";
+"The helper is approved and ready to update the system hosts file." = "ヘルパーは承認済みで、システム hosts ファイルを更新できます。";
+"Helper Approval Required" = "ヘルパーの承認が必要";
+"The helper is waiting for approval in System Settings. Switching remains blocked until it is approved." = "ヘルパーはシステム設定での承認を待っています。承認されるまで切り替えはブロックされます。";
+"Helper Not Installed" = "ヘルパー未インストール";
+"Switch a profile to install the helper. macOS may ask you to approve it." = "プロファイルを切り替えるとヘルパーがインストールされます。macOS が承認を求める場合があります。";
+"Checking Helper…" = "ヘルパーを確認中…";
+"Checking the helper registration status…" = "ヘルパーの登録状況を確認しています…";
+"Maintenance" = "メンテナンス";
+"Background Helper" = "バックグラウンドヘルパー";
+"Deactivate and Remove Helper?" = "ヘルパーを無効にして削除しますか？";
+"Deactivate and Remove" = "無効にして削除";
+"hostflip will remove its privileged helper. Your profiles and base hosts will stay in the workspace. The helper will be requested again on your next switch.\n\nThe system hosts file keeps its current content — entries from active profiles stay in effect. To leave only Base Hosts applied (e.g. before uninstalling), turn off the master switch first." = "hostflip は特権ヘルパーを削除します。プロファイルとベース hosts はワークスペースに残ります。次回の切り替え時にヘルパーのインストールが再度求められます。\n\nシステム hosts ファイルは現在の内容のまま保持され、適用中のプロファイルのエントリは有効なままです。ベース hosts のみを残したい場合（アンインストール前など）は、先にマスタースイッチをオフにしてください。";
+"Retry Remove Helper…" = "ヘルパーの削除を再試行…";
+"Deactivate and Remove Helper…" = "ヘルパーを無効にして削除…";
+"Helper Removed" = "ヘルパーを削除しました";
+"The helper was deactivated and removed. Your profiles were not changed." = "ヘルパーを無効にして削除しました。プロファイルは変更されていません。";
+"Could Not Remove Helper" = "ヘルパーを削除できませんでした";
+"Could not remove the helper. Try again. Your profiles were not changed. %@" = "ヘルパーを削除できませんでした。もう一度お試しください。プロファイルは変更されていません。%@";
+
+/* Command line tab */
+"Not linked yet" = "まだリンクされていません";
+"Linked at %@" = "%@ にリンク済み";
+"Links elsewhere: %@" = "別の場所へのリンク: %@";
+"Something else occupies %@" = "%@ には別のファイルが存在します";
+"The bundled hostflip command drives the same profiles and helper as the app. Homebrew puts it on your PATH automatically; for a direct download, run this once in Terminal:" = "同梱の hostflip コマンドは、アプリと同じプロファイルとヘルパーを操作します。Homebrew でインストールした場合は自動的に PATH に追加されます。直接ダウンロードした場合は、ターミナルで次のコマンドを一度実行してください:";
+"Copied" = "コピーしました";
+"Copy Command" = "コマンドをコピー";
+
+/* Titlebar switch */
+"Resume hostflip" = "hostflip を再開";
+"Pause hostflip" = "hostflip を一時停止";

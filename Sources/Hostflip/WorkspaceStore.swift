@@ -324,10 +324,14 @@ final class WorkspaceStore {
     private func defaultProfileName() -> String {
         let existing = Set((model?.standaloneProfiles ?? []).map(\.name)
             + (model?.groups ?? []).flatMap { $0.profiles.map(\.name) })
-        var candidate = String(localized: "New Profile")
+        // Semantic keys: the literal "New Profile" is already the menu command's
+        // key, and a command phrasing makes a poor default name in translation.
+        var candidate = String(localized: "PROFILE_DEFAULT_NAME", defaultValue: "New Profile")
         var counter = 2
         while existing.contains(candidate) {
-            candidate = String(localized: "New Profile \(counter)")
+            candidate = String(
+                localized: "PROFILE_DEFAULT_NAME_NUMBERED", defaultValue: "New Profile \(counter)"
+            )
             counter += 1
         }
         return candidate
@@ -415,10 +419,12 @@ final class WorkspaceStore {
 
     private func defaultGroupName() -> String {
         let existing = Set(groups.map(\.name))
-        var candidate = String(localized: "New Group")
+        var candidate = String(localized: "GROUP_DEFAULT_NAME", defaultValue: "New Group")
         var counter = 2
         while existing.contains(candidate) {
-            candidate = String(localized: "New Group \(counter)")
+            candidate = String(
+                localized: "GROUP_DEFAULT_NAME_NUMBERED", defaultValue: "New Group \(counter)"
+            )
             counter += 1
         }
         return candidate
