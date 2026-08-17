@@ -338,8 +338,12 @@ struct MainWindowView: View {
             if let group = groupPendingDeletion {
                 if group.profiles.isEmpty {
                     Text("The empty group will be deleted. Base hosts and other groups are not affected.")
+                } else if group.profiles.count == 1 {
+                    // Singular/plural as whole keys: languages disagree on plural
+                    // rules, so a spliced "s" cannot localize.
+                    Text("Its profile will move to Standalone Profiles. Its content and active state will be preserved. Base hosts and other groups are not affected.")
                 } else {
-                    Text("Its \(group.profiles.count) profile\(group.profiles.count == 1 ? "" : "s") will move to Standalone Profiles in the current order. Their content and active state will be preserved. Base hosts and other groups are not affected.")
+                    Text("Its \(group.profiles.count) profiles will move to Standalone Profiles in the current order. Their content and active state will be preserved. Base hosts and other groups are not affected.")
                 }
             }
         }
@@ -1188,11 +1192,11 @@ private struct HostsDriftReviewSheet: View {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 8) {
                             diffCountLabel(
-                                "+\(comparison.diffSummary.additions) in system hosts",
+                                String(localized: "+\(comparison.diffSummary.additions) in system hosts"),
                                 color: .green
                             )
                             diffCountLabel(
-                                "−\(comparison.diffSummary.removals) expected",
+                                String(localized: "−\(comparison.diffSummary.removals) expected"),
                                 color: .red
                             )
                             Spacer()
@@ -1360,7 +1364,10 @@ private struct SystemHostsViewerPane: View {
                 ContentUnavailableView {
                     Label("Cannot Read System Hosts", systemImage: "exclamationmark.triangle")
                 } description: {
-                    Text(store.systemHostsReadError ?? "The current /etc/hosts content is unavailable.")
+                    Text(
+                        store.systemHostsReadError
+                            ?? String(localized: "The current /etc/hosts content is unavailable.")
+                    )
                 } actions: {
                     Button("Retry") {
                         store.refreshSystemHosts()
@@ -1491,9 +1498,9 @@ private struct ProfileEditorHeader: View {
 
     private var locationDescription: String {
         if let group = store.group(containing: profile.id) {
-            return "Group: \(group.name) · One profile active at a time"
+            return String(localized: "Group: \(group.name) · One profile active at a time")
         }
-        return "Standalone profile · Toggles independently"
+        return String(localized: "Standalone profile · Toggles independently")
     }
 
     private func commitRename() {

@@ -12,11 +12,11 @@ enum DockIconVisibilityPolicy: String, CaseIterable, Equatable {
     var title: String {
         switch self {
         case .whenMainWindowIsOpen:
-            "When Main Window Is Open"
+            String(localized: "When Main Window Is Open")
         case .always:
-            "Always"
+            String(localized: "Always")
         case .never:
-            "Never"
+            String(localized: "Never")
         }
     }
 

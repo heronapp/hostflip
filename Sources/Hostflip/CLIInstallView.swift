@@ -38,16 +38,16 @@ struct CLIInstallPresentation {
             """
         switch linkState {
         case .absent:
-            statusTitle = "Not linked yet"
+            statusTitle = String(localized: "Not linked yet")
             statusColor = .secondary
         case .linked(let destination) where destination == cliPath:
-            statusTitle = "Linked at \(Self.linkPath)"
+            statusTitle = String(localized: "Linked at \(Self.linkPath)")
             statusColor = .green
         case .linked(let destination):
-            statusTitle = "Links elsewhere: \(destination)"
+            statusTitle = String(localized: "Links elsewhere: \(destination)")
             statusColor = .orange
         case .occupiedByFile:
-            statusTitle = "Something else occupies \(Self.linkPath)"
+            statusTitle = String(localized: "Something else occupies \(Self.linkPath)")
             statusColor = .orange
         }
     }

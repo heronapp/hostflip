@@ -99,10 +99,18 @@ private struct MenuBarLabel: View {
     }
 
     private var accessibilityLabelText: String {
-        var label = "Hostflip"
-        if store.isPaused { label += ", paused" }
-        if store.hasHostsDrift { label += ", hosts drift detected" }
-        return label
+        // Whole localized variants instead of concatenation: word order is not
+        // universal across languages.
+        switch (store.isPaused, store.hasHostsDrift) {
+        case (false, false):
+            String(localized: "Hostflip")
+        case (true, false):
+            String(localized: "Hostflip, paused")
+        case (false, true):
+            String(localized: "Hostflip, hosts drift detected")
+        case (true, true):
+            String(localized: "Hostflip, paused, hosts drift detected")
+        }
     }
 }
 
@@ -233,10 +241,10 @@ private struct MenuBarContent: View {
         alert.alertStyle = feedback.isFailure ? .critical : .warning
 
         if feedback == .needsApproval {
-            alert.addButton(withTitle: "Open System Settings…")
-            alert.addButton(withTitle: "Later")
+            alert.addButton(withTitle: String(localized: "Open System Settings…"))
+            alert.addButton(withTitle: String(localized: "Later"))
         } else {
-            alert.addButton(withTitle: "OK")
+            alert.addButton(withTitle: String(localized: "OK"))
         }
 
         NSApp.activate()

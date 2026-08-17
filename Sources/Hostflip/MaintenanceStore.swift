@@ -16,12 +16,16 @@ enum MaintenanceFeedback: Equatable {
         switch self {
         case .helperRemoved:
             Presentation(
-                title: "Helper Removed",
-                message: "The helper was deactivated and removed. Your profiles were not changed.",
+                title: String(localized: "Helper Removed"),
+                message: String(localized: "The helper was deactivated and removed. Your profiles were not changed."),
                 isFailure: false
             )
         case .helperRemovalFailed(let message):
-            Presentation(title: "Could Not Remove Helper", message: message, isFailure: true)
+            Presentation(
+                title: String(localized: "Could Not Remove Helper"),
+                message: message,
+                isFailure: true
+            )
         }
     }
 }
@@ -94,7 +98,7 @@ final class MaintenanceStore {
         } catch {
             helperStatus = await loadHelperStatus()
             feedback = .helperRemovalFailed(
-                "Could not remove the helper. Try again. Your profiles were not changed. \(error.localizedDescription)"
+                String(localized: "Could not remove the helper. Try again. Your profiles were not changed. \(error.localizedDescription)")
             )
         }
         updateApprovalPolling()

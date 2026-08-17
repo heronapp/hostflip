@@ -12,11 +12,11 @@ enum AppearancePreference: String, CaseIterable, Equatable {
     var title: String {
         switch self {
         case .auto:
-            "Auto"
+            String(localized: "Auto")
         case .light:
-            "Light"
+            String(localized: "Light")
         case .dark:
-            "Dark"
+            String(localized: "Dark")
         }
     }
 

@@ -200,7 +200,7 @@ private struct UpdatesSettingsView: View {
     var body: some View {
         Form {
             LabeledContent("Current Version") {
-                Text("v\(HostflipBuild.version)")
+                Text(verbatim: "v\(HostflipBuild.version)")
                     .foregroundStyle(.secondary)
             }
 

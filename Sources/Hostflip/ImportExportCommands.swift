@@ -29,7 +29,7 @@ struct ImportExportCommands: Commands {
         NSApp.activate()
         guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
         if case .failed(let message) = store.importFiles(at: panel.urls) {
-            presentError(title: "Import Failed", message: message)
+            presentError(title: String(localized: "Import Failed"), message: message)
         }
     }
 
@@ -45,7 +45,10 @@ struct ImportExportCommands: Commands {
             guard let data = try store.exportSnapshotData() else { return }
             try data.write(to: url, options: .atomic)
         } catch {
-            presentError(title: "Export Failed", message: "Nothing was exported: \(error)")
+            presentError(
+                title: String(localized: "Export Failed"),
+                message: String(localized: "Nothing was exported: \(String(describing: error))")
+            )
         }
     }
 
@@ -62,7 +65,7 @@ struct ImportExportCommands: Commands {
         alert.messageText = title
         alert.informativeText = message
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: String(localized: "OK"))
         alert.runModal()
     }
 }
