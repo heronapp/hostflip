@@ -7,21 +7,23 @@ struct ApplicationSettingsView: View {
     let maintenanceStore: MaintenanceStore
     let dockIconStore: DockIconVisibilityStore
     let launchAtLoginStore: LaunchAtLoginStore
+    let appearanceStore: AppearancePreferenceStore
     let updater: SPUUpdater
 
     // All four tabs share the classic settings-form look of Apple's own app
     // settings windows (right-aligned label column, controls left-aligned,
     // captions under their controls) — the app-settings convention, distinct
     // from the System Settings grouped cards. Top-aligned so switching tabs
-    // never jumps; growth goes in as new rows — e.g. a future appearance
-    // picker joins General.
+    // never jumps; growth goes in as new rows — e.g. the appearance picker
+    // in General.
     var body: some View {
         TabView {
             GeneralSettingsView(
                 dockIconStore: dockIconStore,
-                launchAtLoginStore: launchAtLoginStore
+                launchAtLoginStore: launchAtLoginStore,
+                appearanceStore: appearanceStore
             )
-            .frame(width: 500, height: 170, alignment: .top)
+            .frame(width: 500, height: 220, alignment: .top)
             .tabItem {
                 Label("General", systemImage: "gearshape")
             }
@@ -50,13 +52,29 @@ struct ApplicationSettingsView: View {
     }
 }
 
-/// Everyday preferences; future rows (an appearance picker, say) join as more rows.
+/// Everyday preferences; future rows join as more rows.
 private struct GeneralSettingsView: View {
     let dockIconStore: DockIconVisibilityStore
     let launchAtLoginStore: LaunchAtLoginStore
+    let appearanceStore: AppearancePreferenceStore
 
     var body: some View {
         Form {
+            Picker(
+                "Appearance",
+                selection: Binding(
+                    get: { appearanceStore.preference },
+                    set: { appearanceStore.setPreference($0) }
+                )
+            ) {
+                ForEach(AppearancePreference.allCases, id: \.rawValue) { preference in
+                    Text(preference.title).tag(preference)
+                }
+            }
+            Text("Auto follows the system appearance.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
             Picker(
                 "Show Dock Icon",
                 selection: Binding(

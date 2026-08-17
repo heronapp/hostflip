@@ -13,6 +13,8 @@ struct HostflipApp: App {
     private let maintenanceStore: MaintenanceStore
     private let dockIconStore: DockIconVisibilityStore
     private let launchAtLoginStore = LaunchAtLoginStore()
+    /// Created at launch so a persisted Light/Dark override applies before any window shows.
+    private let appearanceStore = AppearancePreferenceStore()
     /// Sparkle owns the whole update pipeline (scheduled checks, download, install, relaunch); see ADR-0007.
     private let updaterController: SPUStandardUpdaterController
 
@@ -71,6 +73,7 @@ struct HostflipApp: App {
                 maintenanceStore: maintenanceStore,
                 dockIconStore: dockIconStore,
                 launchAtLoginStore: launchAtLoginStore,
+                appearanceStore: appearanceStore,
                 updater: updaterController.updater
             )
         }

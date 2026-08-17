@@ -52,6 +52,10 @@ _Avoid_: menu-bar-only mode, menu bar switch
 Whether hostflip registers itself as a login item to start automatically at login; login launches stay silent in the menu bar without opening the main window.
 _Avoid_: auto-start, boot launch
 
+**Appearance**:
+The app-wide light/dark preference — Auto (follow the system), Light, or Dark; a forced choice applies to every hostflip window, while the menu bar icon always follows the menu bar itself.
+_Avoid_: theme, dark mode
+
 **Workspace**:
 hostflip's persistence directory; holds Base Hosts, the profile files, the manifest, and the original backup from first capture (hosts.orig).
 _Avoid_: data directory, config directory
