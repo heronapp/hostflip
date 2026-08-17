@@ -13,6 +13,8 @@ struct HostflipApp: App {
     private let maintenanceStore: MaintenanceStore
     private let dockIconStore: DockIconVisibilityStore
     private let launchAtLoginStore = LaunchAtLoginStore()
+    /// Created at launch so a persisted Light/Dark override applies before any window shows.
+    private let appearanceStore = AppearancePreferenceStore()
     /// Sparkle owns the whole update pipeline (scheduled checks, download, install, relaunch); see ADR-0007.
     private let updaterController: SPUStandardUpdaterController
 
@@ -71,6 +73,7 @@ struct HostflipApp: App {
                 maintenanceStore: maintenanceStore,
                 dockIconStore: dockIconStore,
                 launchAtLoginStore: launchAtLoginStore,
+                appearanceStore: appearanceStore,
                 updater: updaterController.updater
             )
         }
@@ -96,10 +99,18 @@ private struct MenuBarLabel: View {
     }
 
     private var accessibilityLabelText: String {
-        var label = "Hostflip"
-        if store.isPaused { label += ", paused" }
-        if store.hasHostsDrift { label += ", hosts drift detected" }
-        return label
+        // Whole localized variants instead of concatenation: word order is not
+        // universal across languages.
+        switch (store.isPaused, store.hasHostsDrift) {
+        case (false, false):
+            String(localized: "hostflip")
+        case (true, false):
+            String(localized: "hostflip, paused")
+        case (false, true):
+            String(localized: "hostflip, hosts drift detected")
+        case (true, true):
+            String(localized: "hostflip, paused, hosts drift detected")
+        }
     }
 }
 
@@ -230,10 +241,10 @@ private struct MenuBarContent: View {
         alert.alertStyle = feedback.isFailure ? .critical : .warning
 
         if feedback == .needsApproval {
-            alert.addButton(withTitle: "Open System Settings…")
-            alert.addButton(withTitle: "Later")
+            alert.addButton(withTitle: String(localized: "Open System Settings…"))
+            alert.addButton(withTitle: String(localized: "Later"))
         } else {
-            alert.addButton(withTitle: "OK")
+            alert.addButton(withTitle: String(localized: "OK"))
         }
 
         NSApp.activate()

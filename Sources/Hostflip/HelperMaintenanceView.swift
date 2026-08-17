@@ -11,14 +11,14 @@ struct HelperStatusPresentation {
     init(_ status: DaemonRegistrationStatus?) {
         switch status {
         case .enabled:
-            title = "Helper Ready"
-            description = "The helper is approved and ready to update the system hosts file."
+            title = String(localized: "Helper Ready")
+            description = String(localized: "The helper is approved and ready to update the system hosts file.")
             color = .green
             canRemove = true
             canOpenApprovalSettings = false
         case .requiresApproval:
-            title = "Helper Approval Required"
-            description = "The helper is waiting for approval in System Settings. Switching remains blocked until it is approved."
+            title = String(localized: "Helper Approval Required")
+            description = String(localized: "The helper is waiting for approval in System Settings. Switching remains blocked until it is approved.")
             color = .orange
             canRemove = true
             canOpenApprovalSettings = true
@@ -29,14 +29,14 @@ struct HelperStatusPresentation {
             // registration is lazily triggered by the first switch (ADR-0002).
             // A genuinely broken install (wrong location, policy block) surfaces
             // through switch feedback, not through this passive light.
-            title = "Helper Not Installed"
-            description = "Switch a profile to install the helper. macOS may ask you to approve it."
+            title = String(localized: "Helper Not Installed")
+            description = String(localized: "Switch a profile to install the helper. macOS may ask you to approve it.")
             color = .secondary
             canRemove = false
             canOpenApprovalSettings = false
         case nil:
-            title = "Checking Helper…"
-            description = "Checking the helper registration status…"
+            title = String(localized: "Checking Helper…")
+            description = String(localized: "Checking the helper registration status…")
             color = .secondary
             canRemove = false
             canOpenApprovalSettings = false
@@ -219,9 +219,9 @@ struct HelperRemovalButton: View {
 
     private var title: String {
         if case .helperRemovalFailed = maintenanceStore.feedback {
-            return "Retry Remove Helper…"
+            return String(localized: "Retry Remove Helper…")
         }
-        return "Deactivate and Remove Helper…"
+        return String(localized: "Deactivate and Remove Helper…")
     }
 }
 

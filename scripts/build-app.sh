@@ -26,6 +26,9 @@ cp "$BIN/hostflipd" "$APP/Contents/MacOS/hostflipd"
 cp "$BIN/hostflip" "$APP/Contents/Helpers/hostflip"
 cp Packaging/HostflipApp-Info.plist "$APP/Contents/Info.plist"
 cp Packaging/Hostflip.icns "$APP/Contents/Resources/Hostflip.icns"
+# Raw .strings ship as-is (Foundation reads uncompiled tables); Bundle.main
+# lookup needs the .lproj dirs inside Contents/Resources (ADR-0011).
+cp -R Packaging/Localization/*.lproj "$APP/Contents/Resources/"
 cp Packaging/com.heronapp.hostflip.daemon.plist "$APP/Contents/Library/LaunchDaemons/"
 # SwiftPM places the Sparkle binary artifact next to the built products; the app
 # links it via @rpath, which only resolves once Contents/Frameworks is on the path.

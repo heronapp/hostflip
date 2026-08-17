@@ -20,27 +20,27 @@ enum SwitchFeedback: Equatable {
 
     var title: String {
         switch self {
-        case .merged: "System Hosts Updated"
-        case .baseHostsReplaced: "Base Hosts Replaced"
-        case .needsApproval: "Approval Required"
-        case .unavailable: "Helper Unavailable"
-        case .hostsDrift: "Hosts Drift Detected"
-        case .failed: "Switch Failed"
+        case .merged: String(localized: "System Hosts Updated")
+        case .baseHostsReplaced: String(localized: "Base Hosts Replaced")
+        case .needsApproval: String(localized: "Approval Required")
+        case .unavailable: String(localized: "Helper Unavailable")
+        case .hostsDrift: String(localized: "Hosts Drift Detected")
+        case .failed: String(localized: "Switch Failed")
         }
     }
 
     var message: String {
         switch self {
         case .merged:
-            "System hosts file updated"
+            String(localized: "System hosts file updated")
         case .baseHostsReplaced:
-            "Base Hosts replaced with the current /etc/hosts content. The system file was not changed."
+            String(localized: "Base Hosts replaced with the current /etc/hosts content. The system file was not changed.")
         case .needsApproval:
-            "Switch blocked: hostflip’s background helper needs system approval"
+            String(localized: "Switch blocked: hostflip’s background helper needs system approval")
         case .unavailable:
-            "Helper unavailable: move the app to the Applications folder and reopen it"
+            String(localized: "Helper unavailable: move the app to the Applications folder and reopen it")
         case .hostsDrift:
-            "Switch blocked: system hosts contains changes made outside hostflip"
+            String(localized: "Switch blocked: system hosts contains changes made outside hostflip")
         case .failed(let message):
             message
         }
@@ -187,7 +187,7 @@ final class WorkspaceStore {
                 }
             }
         } catch {
-            loadError = "Cannot open workspace: \(error)"
+            loadError = String(localized: "Cannot open workspace: \(String(describing: error))")
         }
     }
 
@@ -200,14 +200,14 @@ final class WorkspaceStore {
             let data = try readSystemHosts()
             guard let content = String(data: data, encoding: .utf8) else {
                 systemHostsContent = nil
-                systemHostsReadError = "Cannot display /etc/hosts because it is not valid UTF-8."
+                systemHostsReadError = String(localized: "Cannot display /etc/hosts because it is not valid UTF-8.")
                 return
             }
             systemHostsContent = content
             systemHostsReadError = nil
         } catch {
             systemHostsContent = nil
-            systemHostsReadError = "Cannot read /etc/hosts: \(error)"
+            systemHostsReadError = String(localized: "Cannot read /etc/hosts: \(String(describing: error))")
         }
     }
 
@@ -324,10 +324,14 @@ final class WorkspaceStore {
     private func defaultProfileName() -> String {
         let existing = Set((model?.standaloneProfiles ?? []).map(\.name)
             + (model?.groups ?? []).flatMap { $0.profiles.map(\.name) })
-        var candidate = "New Profile"
+        // Semantic keys: the literal "New Profile" is already the menu command's
+        // key, and a command phrasing makes a poor default name in translation.
+        var candidate = String(localized: "PROFILE_DEFAULT_NAME", defaultValue: "New Profile")
         var counter = 2
         while existing.contains(candidate) {
-            candidate = "New Profile \(counter)"
+            candidate = String(
+                localized: "PROFILE_DEFAULT_NAME_NUMBERED", defaultValue: "New Profile \(counter)"
+            )
             counter += 1
         }
         return candidate
@@ -415,10 +419,12 @@ final class WorkspaceStore {
 
     private func defaultGroupName() -> String {
         let existing = Set(groups.map(\.name))
-        var candidate = "New Group"
+        var candidate = String(localized: "GROUP_DEFAULT_NAME", defaultValue: "New Group")
         var counter = 2
         while existing.contains(candidate) {
-            candidate = "New Group \(counter)"
+            candidate = String(
+                localized: "GROUP_DEFAULT_NAME_NUMBERED", defaultValue: "New Group \(counter)"
+            )
             counter += 1
         }
         return candidate
@@ -488,13 +494,15 @@ final class WorkspaceStore {
                     // file until an unrelated merge.
                     commitSwitched(change)
                     switchFeedback = .failed(
-                        "System hosts was updated, but DNS refresh failed: \(failure.message)"
+                        String(localized: "System hosts was updated, but DNS refresh failed: \(failure.message)")
                     )
                 case .failed(let error):
-                    switchFeedback = .failed("Failed to update the system hosts file: \(error)")
+                    switchFeedback = .failed(
+                        String(localized: "Failed to update the system hosts file: \(String(describing: error))")
+                    )
                 }
             } catch {
-                switchFeedback = .failed("Switch failed: \(error)")
+                switchFeedback = .failed(String(localized: "Switch failed: \(String(describing: error))"))
             }
         }
     }
@@ -531,7 +539,7 @@ final class WorkspaceStore {
             backgroundSyncError = nil
         } catch {
             // The change stays committed in memory (persistByReplaying); only the disk write failed
-            saveError = "Save failed: \(error)"
+            saveError = String(localized: "Save failed: \(String(describing: error))")
         }
         switchFeedback = .merged
     }
@@ -608,20 +616,28 @@ final class WorkspaceStore {
                     else { return }
                     hasHostsDrift = false
                     hostsDriftComparison = nil
-                    let message = "System hosts was updated, but DNS refresh failed: \(failure.message)"
+                    let message = String(
+                        localized: "System hosts was updated, but DNS refresh failed: \(failure.message)"
+                    )
                     reconciliationError = message
                     switchFeedback = .failed(message)
                 case .hostsDrift:
                     refreshHostsDriftComparison()
-                    reconciliationError = "System hosts changed again. Review the latest diff before retrying."
+                    reconciliationError = String(
+                        localized: "System hosts changed again. Review the latest diff before retrying."
+                    )
                     switchFeedback = .hostsDrift
                 case .failed(let error):
-                    let message = "Failed to reconcile the system hosts file: \(error)"
+                    let message = String(
+                        localized: "Failed to reconcile the system hosts file: \(String(describing: error))"
+                    )
                     reconciliationError = message
                     switchFeedback = .failed(message)
                 }
             } catch {
-                let message = "Hosts reconciliation failed: \(error)"
+                let message = String(
+                    localized: "Hosts reconciliation failed: \(String(describing: error))"
+                )
                 reconciliationError = message
                 switchFeedback = .failed(message)
             }
@@ -630,19 +646,19 @@ final class WorkspaceStore {
 
     var useSystemHostsAsBaseUnavailableReason: String? {
         guard !isSwitching, !isReconciling else {
-            return "Wait for the current hosts operation to finish."
+            return String(localized: "Wait for the current hosts operation to finish.")
         }
         guard hasHostsDrift, let comparison = hostsDriftComparison else {
-            return "No unresolved hosts drift is available to adopt."
+            return String(localized: "No unresolved hosts drift is available to adopt.")
         }
         guard model?.activeProfileIDs.isEmpty == true else {
-            return "Deactivate every active profile before using System Hosts as Base Hosts."
+            return String(localized: "Deactivate every active profile before using System Hosts as Base Hosts.")
         }
         guard comparison.actualContent != nil else {
-            return "System Hosts must be valid UTF-8 before it can replace Base Hosts."
+            return String(localized: "System Hosts must be valid UTF-8 before it can replace Base Hosts.")
         }
         guard !comparison.containsGeneratedHostflipOutput else {
-            return "System Hosts already contains hostflip-generated sections and cannot be used as Base Hosts."
+            return String(localized: "System Hosts already contains hostflip-generated sections and cannot be used as Base Hosts.")
         }
         return nil
     }
@@ -662,13 +678,17 @@ final class WorkspaceStore {
             guard latestHash == comparison.observedActualHash else {
                 refreshSystemHosts()
                 refreshHostsDriftComparison()
-                reconciliationError = "System hosts changed again. Review the latest diff before retrying."
+                reconciliationError = String(
+                    localized: "System hosts changed again. Review the latest diff before retrying."
+                )
                 switchFeedback = .hostsDrift
                 return
             }
             guard let latestContent = String(data: latestData, encoding: .utf8) else {
                 refreshSystemHosts()
-                reconciliationError = "System Hosts must be valid UTF-8 before it can replace Base Hosts."
+                reconciliationError = String(
+                    localized: "System Hosts must be valid UTF-8 before it can replace Base Hosts."
+                )
                 switchFeedback = .hostsDrift
                 return
             }
@@ -690,7 +710,7 @@ final class WorkspaceStore {
             backgroundSyncError = nil
             switchFeedback = .baseHostsReplaced
         } catch {
-            let message = "Base Hosts could not be replaced: \(error)"
+            let message = String(localized: "Base Hosts could not be replaced: \(String(describing: error))")
             reconciliationError = message
             switchFeedback = .failed(message)
         }
@@ -701,7 +721,9 @@ final class WorkspaceStore {
             reconciliationNeedsAttention = true
             hasHostsDrift = true
             refreshHostsDriftComparison()
-            reconciliationError = "System hosts changed while reconciliation was in progress. Review the latest diff before retrying."
+            reconciliationError = String(
+                localized: "System hosts changed while reconciliation was in progress. Review the latest diff before retrying."
+            )
             switchFeedback = .hostsDrift
             return false
         }
@@ -726,11 +748,13 @@ final class WorkspaceStore {
             return true
         } catch {
             // The change stays committed in memory (persistByReplaying); only the disk write failed
-            saveError = "Save failed: \(error)"
+            saveError = String(localized: "Save failed: \(String(describing: error))")
             reconciliationNeedsAttention = true
             hasHostsDrift = true
             refreshHostsDriftComparison()
-            let message = "System hosts was updated, but the reconciliation could not be saved: \(error)"
+            let message = String(
+                localized: "System hosts was updated, but the reconciliation could not be saved: \(String(describing: error))"
+            )
             reconciliationError = message
             switchFeedback = .failed(message)
             return false
@@ -756,7 +780,7 @@ final class WorkspaceStore {
     /// is committed only after the workspace save succeeds.
     func importFiles(at urls: [URL]) -> ImportOutcome {
         guard model != nil else {
-            return .failed("Nothing was imported: the workspace is not loaded.")
+            return .failed(String(localized: "Nothing was imported: the workspace is not loaded."))
         }
         do {
             let contents = try urls.map { url in
@@ -791,7 +815,7 @@ final class WorkspaceStore {
                 }
             } else {
                 guard var updated = model else {
-                    return .failed("Nothing was imported: the workspace is not loaded.")
+                    return .failed(String(localized: "Nothing was imported: the workspace is not loaded."))
                 }
                 try applyImports(&updated)
                 try workspace.save(updated)
@@ -818,21 +842,21 @@ final class WorkspaceStore {
 
     private static func importFailureMessage(for error: any Error) -> String {
         guard let failure = error as? ImportFileFailure else {
-            return "Nothing was imported: \(error)"
+            return String(localized: "Nothing was imported: \(String(describing: error))")
         }
         let reason = switch failure.underlying as? ImportError {
         case .unsupportedVersion(let version):
-            "this file was created by a newer version of hostflip (format version \(version))"
+            String(localized: "this file was created by a newer version of hostflip (format version \(version))")
         case .malformedSnapshot:
-            "this file is JSON but not a valid hostflip export"
+            String(localized: "this file is JSON but not a valid hostflip export")
         case .blankName:
-            "the export contains a profile or group with an empty name"
+            String(localized: "the export contains a profile or group with an empty name")
         case .invalidTextEncoding:
-            "this file is not UTF-8 text"
+            String(localized: "this file is not UTF-8 text")
         case nil:
             "\(failure.underlying)"
         }
-        return "Nothing was imported. \(failure.fileName): \(reason)."
+        return String(localized: "Nothing was imported. \(failure.fileName): \(reason).")
     }
 
     // MARK: - Persisting and follow-up merging
@@ -859,7 +883,7 @@ final class WorkspaceStore {
                 return
             }
         } catch {
-            saveError = "Save failed: \(error)"
+            saveError = String(localized: "Save failed: \(String(describing: error))")
             return
         }
         scheduleFollowUpMerge()
@@ -947,13 +971,19 @@ final class WorkspaceStore {
         if let channelError = error as? DaemonChannelError {
             return backgroundSyncFailureMessage(for: channelError)
         }
-        return "Changes were saved locally, but the system hosts file could not be updated: \(error)"
+        return String(
+            localized: "Changes were saved locally, but the system hosts file could not be updated: \(String(describing: error))"
+        )
     }
 
     private func backgroundSyncFailureMessage(for error: DaemonChannelError) -> String {
         if error == .selfSigningUnavailable {
-            return "Changes were saved locally, but this build is not properly signed, so the system hosts file could not be updated."
+            return String(
+                localized: "Changes were saved locally, but this build is not properly signed, so the system hosts file could not be updated."
+            )
         }
-        return "Changes were saved locally, but the system hosts file could not be updated: \(error)"
+        return String(
+            localized: "Changes were saved locally, but the system hosts file could not be updated: \(String(describing: error))"
+        )
     }
 }

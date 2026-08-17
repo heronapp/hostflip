@@ -1,0 +1,206 @@
+/* Menu bar */
+"Enable hostflip" = "启用 hostflip";
+"Hosts file changed externally — Review…" = "hosts 文件被外部更改 — 查看…";
+"No profiles yet — create one…" = "还没有方案 — 新建一个…";
+"Open hostflip…" = "打开 hostflip…";
+"Settings…" = "设置…";
+"Quit hostflip" = "退出 hostflip";
+"hostflip" = "hostflip";
+"hostflip, paused" = "hostflip，已暂停";
+"hostflip, hosts drift detected" = "hostflip，检测到外部更改";
+"hostflip, paused, hosts drift detected" = "hostflip，已暂停，检测到外部更改";
+
+/* Shared buttons */
+"Open System Settings…" = "打开系统设置…";
+"Later" = "稍后";
+"OK" = "好";
+"Retry" = "重试";
+"Delete" = "删除";
+
+/* Settings window */
+"General" = "通用";
+"Helper" = "辅助程序";
+"Command Line" = "命令行";
+"Updates" = "更新";
+"Appearance" = "外观";
+"Auto follows the system appearance." = "「自动」跟随系统外观。";
+"Language" = "语言";
+"System" = "跟随系统";
+"Takes effect after relaunching hostflip." = "重新启动 hostflip 后生效。";
+"Relaunch Now" = "立即重新启动";
+"Show Dock Icon" = "显示程序坞图标";
+"The menu bar icon is always shown." = "菜单栏图标始终显示。";
+"Launch at Login" = "登录时启动";
+"hostflip starts silently in the menu bar when you log in." = "登录后 hostflip 在菜单栏静默启动。";
+"Current Version" = "当前版本";
+"Automatically check for updates" = "自动检查更新";
+"Check for Updates" = "检查更新";
+"Auto" = "自动";
+"Light" = "浅色";
+"Dark" = "深色";
+"When Main Window Is Open" = "主窗口打开时";
+"Always" = "总是";
+"Never" = "从不";
+
+/* Sidebar and creation */
+"System Hosts" = "系统 hosts";
+"Base Hosts" = "基础 hosts";
+"Standalone Profiles" = "独立方案";
+"Drag to Move" = "拖动以移动";
+"Drag to move" = "拖动以移动";
+"No Profiles Yet" = "还没有方案";
+"Create a profile to switch hosts without changing Base Hosts." = "新建方案即可在不改动基础 hosts 的情况下切换 hosts。";
+"Create Profile" = "新建方案";
+"New" = "新建";
+"New Profile" = "新建方案";
+"New Group" = "新建分组";
+"PROFILE_DEFAULT_NAME" = "新方案";
+"PROFILE_DEFAULT_NAME_NUMBERED" = "新方案 %lld";
+"GROUP_DEFAULT_NAME" = "新分组";
+"GROUP_DEFAULT_NAME_NUMBERED" = "新分组 %lld";
+"Group Name" = "分组名称";
+"Rename Group…" = "重命名分组…";
+"Move Up" = "上移";
+"Move Down" = "下移";
+"Delete Group…" = "删除分组…";
+"Rename Profile…" = "重命名方案…";
+"Move To" = "移动到";
+"Delete Profile…" = "删除方案…";
+"Profile Actions" = "方案操作";
+"Group Actions" = "分组操作";
+"Actions for %@" = "%@ 的操作";
+"Expand %@" = "展开 %@";
+"Collapse %@" = "折叠 %@";
+"Expand Group" = "展开分组";
+"Collapse Group" = "折叠分组";
+"Select for editing. Drag to move." = "选中以编辑。拖动以移动。";
+"Activate %@" = "将 %@ 设为生效";
+"Deactivate %@" = "取消 %@ 的生效";
+"Active" = "生效中";
+"Inactive" = "未生效";
+"Saved Active" = "已选用（暂停中）";
+"Make Active" = "设为生效";
+"Delete Profile" = "删除方案";
+"Group: %@ · One profile active at a time" = "分组：%@ · 同一分组内同时只有一个方案生效";
+"Standalone profile · Toggles independently" = "独立方案 · 独立开关";
+
+/* Delete confirmations */
+"Delete “%@”?" = "删除“%@”？";
+"The profile’s content will be removed. Base hosts and other profiles are not affected." = "该方案的内容将被移除。基础 hosts 和其他方案不受影响。";
+"Delete Group" = "删除分组";
+"The empty group will be deleted. Base hosts and other groups are not affected." = "该空分组将被删除。基础 hosts 和其他分组不受影响。";
+"Its profile will move to Standalone Profiles. Its content and active state will be preserved. Base hosts and other groups are not affected." = "分组内的方案将移至独立方案。其内容与生效状态将被保留。基础 hosts 和其他分组不受影响。";
+"Its %lld profiles will move to Standalone Profiles in the current order. Their content and active state will be preserved. Base hosts and other groups are not affected." = "分组内的 %lld 个方案将按当前顺序移至独立方案。其内容与生效状态将被保留。基础 hosts 和其他分组不受影响。";
+
+/* Banner and drift review */
+"Paused — selections are saved but not applied to the system hosts file." = "已暂停 — 选用状态已保存，但不会应用到系统 hosts 文件。";
+"System hosts changed outside hostflip. Review the drift to continue switching." = "系统 hosts 在 hostflip 之外被更改。查看外部更改后才能继续切换。";
+"Review Drift" = "查看外部更改";
+"Helper approval is required before switching profiles." = "切换方案前需要先批准辅助程序。";
+"Dismiss Status" = "关闭状态提示";
+"Review Hosts Drift" = "查看 hosts 的外部更改";
+"Review what changed outside hostflip before switching profiles again." = "查看在 hostflip 之外发生的更改，然后再继续切换方案。";
+"+%lld in system hosts" = "系统 hosts 多出 %lld 行";
+"−%lld expected" = "较预期少 %lld 行";
+"Recommended: add drifted lines to Base Hosts so they are preserved. Discarding replaces the system file with hostflip’s active state." = "建议：将外部新增的行并入基础 hosts 以保留它们。选择丢弃则用 hostflip 的当前生效状态覆盖系统 hosts 文件。";
+"Diff Unavailable" = "无法显示差异";
+"hostflip could not read the current system hosts file." = "hostflip 无法读取当前系统 hosts 文件。";
+"Reconciling…" = "正在处理外部更改…";
+"Use System Hosts as Base…" = "将系统 hosts 用作基础…";
+"Use System Hosts as Base" = "将系统 hosts 用作基础";
+"Use the current System Hosts as Base Hosts?" = "将当前系统 hosts 用作基础 hosts？";
+"Discard Drift" = "丢弃外部更改";
+"Add to Base Hosts" = "并入基础 hosts";
+"This replaces the current Base Hosts without creating an undo copy. The original hosts.orig backup and /etc/hosts will not be changed." = "此操作将替换当前基础 hosts，且不会创建可撤销的副本。最初的 hosts.orig 备份和 /etc/hosts 不会被更改。";
+
+/* Editor panes */
+"/etc/hosts · Read Only" = "/etc/hosts · 只读";
+"Cannot Read System Hosts" = "无法读取系统 hosts";
+"The current /etc/hosts content is unavailable." = "当前 /etc/hosts 内容不可用。";
+"Protected · Read Only" = "受保护 · 只读";
+"Always Active" = "始终生效";
+"Profile Name" = "方案名称";
+"Open Maintenance" = "打开维护面板";
+
+/* Switch feedback */
+"System Hosts Updated" = "系统 hosts 已更新";
+"Base Hosts Replaced" = "基础 hosts 已替换";
+"Approval Required" = "需要批准";
+"Helper Unavailable" = "辅助程序不可用";
+"Hosts Drift Detected" = "检测到外部更改";
+"Switch Failed" = "切换失败";
+"System hosts file updated" = "系统 hosts 文件已更新";
+"Base Hosts replaced with the current /etc/hosts content. The system file was not changed." = "已用当前 /etc/hosts 内容替换基础 hosts。系统文件本身未被更改。";
+"Switch blocked: hostflip’s background helper needs system approval" = "切换被阻止：hostflip 的后台辅助程序需要系统批准";
+"Helper unavailable: move the app to the Applications folder and reopen it" = "辅助程序不可用：请将应用移到「应用程序」文件夹后重新打开";
+"Switch blocked: system hosts contains changes made outside hostflip" = "切换被阻止：系统 hosts 包含在 hostflip 之外所做的更改";
+
+/* Workspace errors */
+"Cannot open workspace: %@" = "无法打开工作区：%@";
+"Cannot display /etc/hosts because it is not valid UTF-8." = "/etc/hosts 不是有效的 UTF-8，无法显示。";
+"Cannot read /etc/hosts: %@" = "无法读取 /etc/hosts：%@";
+"System hosts was updated, but DNS refresh failed: %@" = "系统 hosts 已更新，但 DNS 刷新失败：%@";
+"Failed to update the system hosts file: %@" = "更新系统 hosts 文件失败：%@";
+"Switch failed: %@" = "切换失败：%@";
+"Save failed: %@" = "保存失败：%@";
+"System hosts changed again. Review the latest diff before retrying." = "系统 hosts 再次发生更改。请查看最新差异后重试。";
+"Failed to reconcile the system hosts file: %@" = "处理系统 hosts 文件的外部更改失败：%@";
+"Hosts reconciliation failed: %@" = "处理 hosts 的外部更改失败：%@";
+"Wait for the current hosts operation to finish." = "请等待当前 hosts 操作完成。";
+"No unresolved hosts drift is available to adopt." = "当前没有待处理的外部更改可供采用。";
+"Deactivate every active profile before using System Hosts as Base Hosts." = "将系统 hosts 用作基础 hosts 前，请先取消所有方案的生效。";
+"System Hosts must be valid UTF-8 before it can replace Base Hosts." = "系统 hosts 必须是有效的 UTF-8 才能替换基础 hosts。";
+"System Hosts already contains hostflip-generated sections and cannot be used as Base Hosts." = "系统 hosts 已包含 hostflip 生成的区块，不能用作基础 hosts。";
+"Base Hosts could not be replaced: %@" = "基础 hosts 替换失败：%@";
+"System hosts changed while reconciliation was in progress. Review the latest diff before retrying." = "处理外部更改期间，系统 hosts 发生了更改。请查看最新差异后重试。";
+"System hosts was updated, but the reconciliation could not be saved: %@" = "系统 hosts 已更新，但外部更改的处理结果保存失败：%@";
+"Changes were saved locally, but the system hosts file could not be updated: %@" = "更改已保存到本地，但系统 hosts 文件未能更新：%@";
+"Changes were saved locally, but this build is not properly signed, so the system hosts file could not be updated." = "更改已保存到本地，但此构建未正确签名，系统 hosts 文件未能更新。";
+
+/* Import / export */
+"Import…" = "导入…";
+"Export…" = "导出…";
+"Import Failed" = "导入失败";
+"Export Failed" = "导出失败";
+"Nothing was exported: %@" = "未导出任何内容：%@";
+"Nothing was imported: the workspace is not loaded." = "未导入任何内容：工作区尚未加载。";
+"Nothing was imported: %@" = "未导入任何内容：%@";
+"this file was created by a newer version of hostflip (format version %lld)" = "此文件由更新版本的 hostflip 创建（格式版本 %lld）";
+"this file is JSON but not a valid hostflip export" = "此文件是 JSON，但不是有效的 hostflip 导出文件";
+"the export contains a profile or group with an empty name" = "导出内容中存在名称为空的方案或分组";
+"this file is not UTF-8 text" = "此文件不是 UTF-8 文本";
+"Nothing was imported. %@: %@." = "未导入任何内容。%@：%@。";
+
+/* Helper maintenance */
+"Helper Ready" = "辅助程序就绪";
+"The helper is approved and ready to update the system hosts file." = "辅助程序已获批准，可以更新系统 hosts 文件。";
+"Helper Approval Required" = "辅助程序需要批准";
+"The helper is waiting for approval in System Settings. Switching remains blocked until it is approved." = "辅助程序正在等待「系统设置」中的批准。批准前切换将保持被阻止。";
+"Helper Not Installed" = "辅助程序未安装";
+"Switch a profile to install the helper. macOS may ask you to approve it." = "切换任一方案即可安装辅助程序。macOS 可能会要求你批准。";
+"Checking Helper…" = "正在检查辅助程序…";
+"Checking the helper registration status…" = "正在检查辅助程序的注册状态…";
+"Maintenance" = "维护";
+"Background Helper" = "后台辅助程序";
+"Deactivate and Remove Helper?" = "停用并移除辅助程序？";
+"Deactivate and Remove" = "停用并移除";
+"hostflip will remove its privileged helper. Your profiles and base hosts will stay in the workspace. The helper will be requested again on your next switch.\n\nThe system hosts file keeps its current content — entries from active profiles stay in effect. To leave only Base Hosts applied (e.g. before uninstalling), turn off the master switch first." = "hostflip 将移除其特权辅助程序。你的方案和基础 hosts 会保留在工作区中。下次切换时会重新请求安装辅助程序。\n\n系统 hosts 文件保持当前内容 — 生效方案的条目继续有效。若只想保留基础 hosts（例如卸载前），请先关闭总开关。";
+"Retry Remove Helper…" = "重试移除辅助程序…";
+"Deactivate and Remove Helper…" = "停用并移除辅助程序…";
+"Helper Removed" = "辅助程序已移除";
+"The helper was deactivated and removed. Your profiles were not changed." = "辅助程序已停用并移除。你的方案未受影响。";
+"Could Not Remove Helper" = "无法移除辅助程序";
+"Could not remove the helper. Try again. Your profiles were not changed. %@" = "无法移除辅助程序。请重试。你的方案未受影响。%@";
+
+/* Command line tab */
+"Not linked yet" = "尚未链接";
+"Linked at %@" = "已链接于 %@";
+"Links elsewhere: %@" = "链接指向其他位置：%@";
+"Something else occupies %@" = "%@ 已被其他文件占用";
+"The bundled hostflip command drives the same profiles and helper as the app. Homebrew puts it on your PATH automatically; for a direct download, run this once in Terminal:" = "随附的 hostflip 命令与应用共用同一套方案和辅助程序。Homebrew 安装会自动将其加入 PATH；直接下载的用户请在终端中运行一次：";
+"Copied" = "已拷贝";
+"Copy Command" = "拷贝命令";
+
+/* Titlebar switch */
+"Resume hostflip" = "恢复 hostflip";
+"Pause hostflip" = "暂停 hostflip";
