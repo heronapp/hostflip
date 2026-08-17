@@ -1,3 +1,4 @@
+import AppKit
 import HostflipXPC
 import Sparkle
 import SwiftUI
@@ -23,7 +24,7 @@ struct ApplicationSettingsView: View {
                 launchAtLoginStore: launchAtLoginStore,
                 appearanceStore: appearanceStore
             )
-            .frame(width: 500, height: 220, alignment: .top)
+            .frame(width: 500, height: 280, alignment: .top)
             .tabItem {
                 Label("General", systemImage: "gearshape")
             }
@@ -58,6 +59,9 @@ private struct GeneralSettingsView: View {
     let launchAtLoginStore: LaunchAtLoginStore
     let appearanceStore: AppearancePreferenceStore
 
+    @Environment(\.locale) private var locale
+    @State private var languageSelection = GeneralSettingsView.storedLanguageSelection()
+
     var body: some View {
         Form {
             Picker(
@@ -74,6 +78,31 @@ private struct GeneralSettingsView: View {
             Text("Auto follows the system appearance.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
+
+            // Languages name themselves and are deliberately untranslated;
+            // only "System" localizes.
+            Picker("Language", selection: $languageSelection) {
+                Text("System").tag(LanguagePreference.system)
+                Text(verbatim: "English").tag(LanguagePreference.english)
+                Text(verbatim: "简体中文").tag(LanguagePreference.simplifiedChinese)
+                Text(verbatim: "繁體中文").tag(LanguagePreference.traditionalChinese)
+                Text(verbatim: "日本語").tag(LanguagePreference.japanese)
+            }
+            .onChange(of: languageSelection) { _, selection in
+                if let languages = selection.overrideLanguages {
+                    UserDefaults.standard.set(languages, forKey: "AppleLanguages")
+                } else {
+                    UserDefaults.standard.removeObject(forKey: "AppleLanguages")
+                }
+            }
+            if needsRestart {
+                HStack(spacing: 12) {
+                    Text("Takes effect after relaunching hostflip.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Button("Relaunch Now") { relaunch() }
+                }
+            }
 
             Picker(
                 "Show Dock Icon",
@@ -99,6 +128,61 @@ private struct GeneralSettingsView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(20)
+        .onAppear {
+            // Reread on every window open — System Settings' per-app language
+            // writes the same key and must be reflected here.
+            languageSelection = Self.storedLanguageSelection()
+        }
+    }
+
+    /// Reads the app-domain override via persistentDomain: array(forKey:) walks the
+    /// search list and inherits the global language order, so it can never
+    /// distinguish "follow system" from an override.
+    private static func storedLanguageSelection() -> LanguagePreference {
+        let domain = Bundle.main.bundleIdentifier
+            .flatMap { UserDefaults.standard.persistentDomain(forName: $0) }
+        return LanguagePreference(override: domain?["AppleLanguages"] as? [String])
+    }
+
+    /// Only prompts when the selection's post-relaunch language differs from this
+    /// launch's — flipping between "System" and the language the system already
+    /// resolves to stays quiet.
+    private var needsRestart: Bool {
+        let launchLanguage = LanguagePreference.match(locale) ?? "en"
+        return languageSelection.effectiveLanguage(
+            systemLanguages: systemLanguages(fallbackLanguage: launchLanguage)
+        ) != launchLanguage
+    }
+
+    /// The full system language list, read from the global domain (the app domain's
+    /// own override would shadow it); unreadable → this launch's language.
+    private func systemLanguages(fallbackLanguage: String) -> [String] {
+        let raw = CFPreferencesCopyValue(
+            "AppleLanguages" as CFString,
+            kCFPreferencesAnyApplication,
+            kCFPreferencesCurrentUser,
+            kCFPreferencesAnyHost
+        )
+        return raw as? [String] ?? [fallbackLanguage]
+    }
+
+    /// A detached shell waits for this process to exit, then reopens the bundle —
+    /// the relaunch survives NSApp.terminate tearing this process down.
+    private func relaunch() {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = [
+            "-c",
+            #"while /bin/kill -0 "$1" 2>/dev/null; do /bin/sleep 0.1; done; /usr/bin/open "$2""#,
+            "hostflip-relaunch",
+            String(ProcessInfo.processInfo.processIdentifier),
+            Bundle.main.bundlePath
+        ]
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try? process.run()
+        NSApp.terminate(nil)
     }
 }
 

@@ -56,6 +56,10 @@ _Avoid_: auto-start, boot launch
 The app-wide light/dark preference — Auto (follow the system), Light, or Dark; a forced choice applies to every hostflip window, while the menu bar icon always follows the menu bar itself.
 _Avoid_: theme, dark mode
 
+**Language**:
+The app-wide language preference — System (follow the system) or one of the shipped languages; shares its stored state with macOS's per-app language setting and takes effect after relaunching hostflip.
+_Avoid_: locale (for this setting), translation setting
+
 **Workspace**:
 hostflip's persistence directory; holds Base Hosts, the profile files, the manifest, and the original backup from first capture (hosts.orig).
 _Avoid_: data directory, config directory
