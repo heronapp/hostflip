@@ -160,4 +160,86 @@ final class ImportExportTests: XCTestCase {
         XCTAssertEqual(Set(allIDs).count, allIDs.count)
         XCTAssertEqual(allIDs.count, 9)
     }
+
+    // MARK: - Import summary (#69)
+
+    func testImportSummaryCountsProfilesAndCarriesNoURLsForLocalContent() throws {
+        let summary = ImportSummary(of: [
+            .snapshot(ExportSnapshot(of: try makeModel())),
+            .plainText(name: "Team DB", content: "10.0.0.3 db.example\n"),
+        ])
+
+        XCTAssertEqual(summary, ImportSummary(profileCount: 4, remoteSourceURLs: []))
+    }
+
+    func testImportSummaryListsEveryRemoteSourceURLInImportOrder() {
+        let summary = ImportSummary(of: [
+            .snapshot(ExportSnapshot(
+                standaloneProfiles: [.init(
+                    name: "GitHub Hosts",
+                    content: "#!hostflip-remote https://a.example/hosts interval=1h\n0.0.0.0 x\n"
+                )],
+                groups: [.init(name: "Feeds", profiles: [
+                    .init(name: "Local", content: "10.0.0.1 api.example\n"),
+                    .init(name: "Blocklist", content: "#!hostflip-remote https://b.example/hosts\n"),
+                ])]
+            )),
+            .plainText(
+                name: "Mirror",
+                content: "#!hostflip-remote https://c.example/hosts interval=manual\n"
+            ),
+        ])
+
+        XCTAssertEqual(summary, ImportSummary(
+            profileCount: 4,
+            remoteSourceURLs: [
+                "https://a.example/hosts", "https://b.example/hosts", "https://c.example/hosts",
+            ]
+        ))
+    }
+
+    func testImportSummaryDoesNotTreatAMalformedHeaderAsRemote() {
+        let summary = ImportSummary(of: [
+            .plainText(name: "Insecure", content: "#!hostflip-remote http://a.example/hosts\n")
+        ])
+
+        XCTAssertEqual(summary, ImportSummary(profileCount: 1, remoteSourceURLs: []))
+    }
+
+    // MARK: - Remote profile round-trip (#69)
+
+    /// The Remote Header is in-band (ADR-0012), so an export carries it as plain content: the
+    /// snapshot format stays v1, this version rebuilds the profile as remote, and an older
+    /// hostflip imports the same file as a local profile with a comment line.
+    func testExportThenImportRoundTripsRemoteIdentityURLAndInterval() throws {
+        let content = "#!hostflip-remote https://hosts.example/list.txt interval=6h\n0.0.0.0 tracker.example\n"
+        let exporting = try ActivationModel(
+            baseHosts: BaseHosts(content: "127.0.0.1 localhost\n"),
+            standaloneProfiles: [Profile(id: .init("r1"), name: "Blocklist", content: content)],
+            groups: [],
+            activeProfileIDs: [.init("r1")]
+        )
+        let data = try ExportSnapshot(of: exporting).encoded()
+
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(object["version"] as? Int, 1)
+        guard case .snapshot(let snapshot) = try ImportReader.read(data: data, fileName: "team.json") else {
+            return XCTFail("an exported file must read back as a snapshot")
+        }
+        var importing = try ActivationModel(
+            baseHosts: BaseHosts(content: "127.0.0.1 localhost\n"),
+            standaloneProfiles: [],
+            groups: [],
+            activeProfileIDs: []
+        )
+        try importing.importSnapshot(snapshot)
+
+        let imported = try XCTUnwrap(importing.standaloneProfiles.first)
+        XCTAssertEqual(imported.content, content)
+        XCTAssertTrue(imported.isRemote)
+        XCTAssertEqual(imported.remoteHeader?.sourceURL.absoluteString, "https://hosts.example/list.txt")
+        XCTAssertEqual(imported.remoteHeader?.interval, .sixHours)
+        // Active state never travels in a snapshot; the rebuilt remote profile lands inactive.
+        XCTAssertEqual(importing.activeProfileIDs, [])
+    }
 }

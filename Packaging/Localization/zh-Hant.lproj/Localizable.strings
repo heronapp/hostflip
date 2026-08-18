@@ -76,10 +76,8 @@
 "Select for editing. Drag to move." = "選取以編輯。拖移以移動。";
 "Activate %@" = "將 %@ 設為生效";
 "Deactivate %@" = "取消 %@ 的生效";
-"Active" = "生效中";
+"Active" = "生效";
 "Inactive" = "未生效";
-"Saved Active" = "已選用（暫停中）";
-"Make Active" = "設為生效";
 "Delete Profile" = "刪除方案";
 "Group: %@ · One profile active at a time" = "群組：%@ · 同一群組內同時只有一個方案生效";
 "Standalone profile · Toggles independently" = "獨立方案 · 獨立開關";
@@ -119,6 +117,11 @@
 "The current /etc/hosts content is unavailable." = "目前的 /etc/hosts 內容無法取得。";
 "Protected · Read Only" = "受保護 · 唯讀";
 "Always Active" = "始終生效";
+"Remote · Read Only" = "遠端 · 唯讀";
+"Refreshes every hour" = "每小時重新整理";
+"Refreshes every 6 hours" = "每 6 小時重新整理";
+"Refreshes every 24 hours" = "每 24 小時重新整理";
+"Manual refresh only" = "僅手動重新整理";
 "Profile Name" = "方案名稱";
 "Open Maintenance" = "開啟維護面板";
 
@@ -170,6 +173,10 @@
 "the export contains a profile or group with an empty name" = "匯出內容中存在名稱為空的方案或群組";
 "this file is not UTF-8 text" = "此檔案不是 UTF-8 文字";
 "Nothing was imported. %@: %@." = "未匯入任何內容。%@：%@。";
+"Import Complete" = "匯入完成";
+"Imported 1 profile." = "已匯入 1 個方案。";
+"Imported %lld profiles." = "已匯入 %lld 個方案。";
+"Remote profiles will fetch content from these URLs:" = "遠端方案將從以下 URL 取得內容：";
 
 /* Helper maintenance */
 "Helper Ready" = "輔助程式已就緒";
@@ -204,3 +211,58 @@
 /* Titlebar switch */
 "Resume hostflip" = "恢復 hostflip";
 "Pause hostflip" = "暫停 hostflip";
+
+/* Remote profile creation */
+"New Remote Profile…" = "新增遠端方案…";
+"New Remote Profile" = "新增遠端方案";
+"hostflip fetches hosts content from the Source URL and keeps the profile up to date. Remote content is read-only." = "hostflip 會從來源 URL 取得 hosts 內容並保持方案為最新。遠端內容為唯讀。";
+"Source URL" = "來源 URL";
+"Name" = "名稱";
+"Optional — the URL’s host" = "可留空 — 預設使用 URL 的主機名稱";
+"Refresh" = "重新整理";
+"Every Hour" = "每小時";
+"Every 6 Hours" = "每 6 小時";
+"Every 24 Hours" = "每 24 小時";
+"Manual Only" = "僅手動";
+"Fetching…" = "正在取得…";
+"Cancel" = "取消";
+"Create" = "建立";
+"The workspace is not loaded." = "工作區尚未載入。";
+"The Source URL must be an HTTPS address." = "來源 URL 必須是 HTTPS 位址。";
+"The URL redirected to a non-HTTPS address." = "此 URL 重新導向至非 HTTPS 位址。";
+"The fetched content is larger than 10 MB." = "取得的內容超過 10 MB。";
+"The fetched content is not UTF-8 text." = "取得的內容不是 UTF-8 文字。";
+"The URL returned a web page, not hosts content." = "此 URL 回傳的是網頁，而不是 hosts 內容。";
+"The content could not be fetched: %@" = "無法取得內容：%@";
+"The Source URL could not be reached: %@" = "無法連線來源 URL：%@";
+"The server responded with HTTP %lld." = "伺服器回應了 HTTP %lld。";
+"The fetch was cancelled." = "已取消取得。";
+
+/* Remote refresh */
+"Refresh Now" = "立即重新整理";
+"Refresh All Remote Profiles" = "重新整理所有遠端方案";
+"Refreshing…" = "正在重新整理…";
+"Refreshing %@" = "正在重新整理 %@";
+"Last refresh failed." = "上次重新整理失敗。";
+"Last successful refresh: %@" = "上次成功重新整理：%@";
+"No successful refresh yet." = "尚未成功重新整理過。";
+"Refreshed %@" = "重新整理於%@";
+"Refresh failed · content from %@" = "重新整理失敗 · 內容來自%@";
+"Refresh failed" = "重新整理失敗";
+"Not yet refreshed" = "尚未重新整理";
+
+/* Remote conversion and editing */
+"Edit Source URL & Interval…" = "編輯來源 URL 與重新整理間隔…";
+"Convert to Local…" = "轉換為本機方案…";
+"Convert to Local Profile?" = "要轉換為本機方案嗎？";
+"Convert to Local" = "轉換為本機方案";
+"The profile will stop fetching from %@. The current content stays as an editable local profile." = "此方案將不再從 %@ 取得內容。目前內容將保留為可編輯的本機方案。";
+"Convert to Remote Profile?" = "要轉換為遠端方案嗎？";
+"The edited first line is a Remote Header. Converting makes this a Remote Profile: its content is replaced by what the Source URL serves and becomes read-only. Keeping it local discards the edit." = "編輯後的第一行是 Remote Header。轉換後它將成為遠端方案：內容將替換為從來源 URL 取得的內容，並變為唯讀。保留為本機方案則會放棄這次編輯。";
+"Keep as Local" = "保留為本機方案";
+"Convert" = "轉換";
+"Edit Remote Profile" = "編輯遠端方案";
+"Changing the Source URL fetches and validates the new address first; until that succeeds, the current Source URL and content stay." = "更改來源 URL 時會先取得並驗證新位址；在成功之前，目前來源 URL 與內容保持不變。";
+"Save" = "儲存";
+"The profile was changed outside this dialog." = "方案已在此對話框之外被更改。";
+"The profile is no longer a remote profile." = "此方案已不再是遠端方案。";

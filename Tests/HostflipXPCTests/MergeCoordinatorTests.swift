@@ -158,8 +158,11 @@ final class MergeCoordinatorTests: XCTestCase {
         do {
             try await coordinator.merge(merged)
             XCTFail("a manifest record failure must be rethrown")
-        } catch let error as WorkspaceError {
-            XCTAssertEqual(error, .notInitialized)
+        } catch let error as ConfirmedWriteBaselineError {
+            // Typed, with the confirmed hash attached (#73): the daemon did write, and a
+            // caller reporting this as "hosts not updated" would misdescribe the system.
+            XCTAssertEqual(error.confirmedHash, merged.hash)
+            XCTAssertEqual(error.underlying as? WorkspaceError, .notInitialized)
         }
 
         let baselines = await receivedBaseline.events

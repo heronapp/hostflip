@@ -9,6 +9,9 @@ enum CatCommand {
         let name: String
         /// The containing group's name; absent for a standalone profile.
         let group: String?
+        /// Present only for Remote Profiles; the human output needs no extra rendering because
+        /// the verbatim content already leads with the Remote Header line itself.
+        let remote: RemoteMetadata?
         let content: String
 
         var humanText: String { content }
@@ -22,6 +25,7 @@ enum CatCommand {
             id: match.profile.id.rawValue,
             name: match.profile.name,
             group: match.groupName,
+            remote: RemoteMetadata(of: match.profile),
             content: match.profile.content
         )
     }

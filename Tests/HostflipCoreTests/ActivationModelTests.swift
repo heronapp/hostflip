@@ -60,6 +60,30 @@ final class ActivationModelTests: XCTestCase {
         XCTAssertEqual(model.activeProfileIDs, [staging.id, office.id])
     }
 
+    func testRemoteHeaderContentFollowsTheSameActivationRulesAsLocalContent() throws {
+        // Remote identity lives in the content's first line only (ADR-0012); activation, group
+        // exclusivity, and standalone stacking never look at it.
+        let headerLine = "#!hostflip-remote https://example.com/hosts.txt interval=1h\n"
+        let groupedRemote = Profile(id: .init("grouped-remote"), name: "Grouped Remote", content: headerLine + "1.2.3.4 a.example.com\n")
+        let sibling = makeProfile("sibling")
+        let standaloneRemote = Profile(id: .init("standalone-remote"), name: "Standalone Remote", content: headerLine)
+        var model = try makeModel(
+            standaloneProfiles: [standaloneRemote],
+            groups: [makeGroup("environment", profiles: [groupedRemote, sibling])]
+        )
+
+        try model.toggleProfile(groupedRemote.id)
+        try model.toggleProfile(standaloneRemote.id)
+
+        XCTAssertEqual(model.activeProfileIDs, [groupedRemote.id, standaloneRemote.id])
+        assertEffectiveProfiles([standaloneRemote, groupedRemote], in: model)
+
+        try model.toggleProfile(sibling.id)
+
+        XCTAssertEqual(model.activeProfileIDs, [sibling.id, standaloneRemote.id])
+        assertEffectiveProfiles([standaloneRemote, sibling], in: model)
+    }
+
     func testPausingKeepsActivationStateWhileOnlyBaseHostsAreEffective() throws {
         let blocker = makeProfile("blocker")
         var model = try makeModel(standaloneProfiles: [blocker])
@@ -365,8 +389,187 @@ final class ActivationModelTests: XCTestCase {
         XCTAssertEqual(model.groups, [environment, network])
     }
 
+    // MARK: - Remote refresh state (ADR-0012)
+
+    func testProfileLookupFindsStandaloneAndGroupedProfiles() throws {
+        let standalone = makeProfile("standalone")
+        let grouped = makeProfile("grouped")
+        let model = try makeModel(
+            standaloneProfiles: [standalone],
+            groups: [makeGroup("environment", profiles: [grouped])]
+        )
+
+        XCTAssertEqual(model.profile(standalone.id), standalone)
+        XCTAssertEqual(model.profile(grouped.id), grouped)
+        XCTAssertNil(model.profile(.init("missing")))
+    }
+
+    func testRecordingARefreshSuccessReplacesTheStateAndClearsTheFailureMarker() throws {
+        let remote = makeRemoteProfile("remote")
+        var model = try makeModel(standaloneProfiles: [remote])
+        let succeededAt = Date(timeIntervalSince1970: 1_755_000_000)
+
+        try model.recordRemoteRefreshFailure(remote.id)
+        try model.recordRemoteRefreshSuccess(remote.id, at: succeededAt)
+
+        XCTAssertEqual(
+            model.profile(remote.id)?.remoteRefreshState,
+            RemoteRefreshState(lastSuccessAt: succeededAt, lastAttemptFailed: false)
+        )
+    }
+
+    func testRecordingARefreshSuccessFloorsTheDateToWholeSeconds() throws {
+        // The manifest's ISO8601 encoding truncates fractional seconds; a recorded date
+        // must equal its persisted round trip, or refresh staleness baselines would treat
+        // every follow-up refresh as stale.
+        let remote = makeRemoteProfile("remote")
+        var model = try makeModel(standaloneProfiles: [remote])
+
+        try model.recordRemoteRefreshSuccess(
+            remote.id,
+            at: Date(timeIntervalSince1970: 1_755_505_332.734)
+        )
+
+        XCTAssertEqual(
+            model.profile(remote.id)?.remoteRefreshState?.lastSuccessAt,
+            Date(timeIntervalSince1970: 1_755_505_332)
+        )
+    }
+
+    func testRecordingARefreshSuccessStoresTheValidators() throws {
+        let remote = makeRemoteProfile("remote")
+        var model = try makeModel(standaloneProfiles: [remote])
+        let succeededAt = Date(timeIntervalSince1970: 1_755_000_000)
+        let validators = RemoteContentValidators(
+            etag: "\"abc123\"",
+            lastModified: "Mon, 17 Aug 2026 00:00:00 GMT"
+        )
+
+        try model.recordRemoteRefreshSuccess(remote.id, at: succeededAt, validators: validators)
+
+        XCTAssertEqual(
+            model.profile(remote.id)?.remoteRefreshState,
+            RemoteRefreshState(
+                lastSuccessAt: succeededAt,
+                lastAttemptFailed: false,
+                validators: validators
+            )
+        )
+    }
+
+    func testRecordingARefreshFailureKeepsTheValidators() throws {
+        // A failed attempt keeps the last successful content, and with it the validators
+        // that describe that content: the next conditional fetch must still be able to
+        // answer 304 for it.
+        let remote = makeRemoteProfile("remote")
+        var model = try makeModel(standaloneProfiles: [remote])
+        let validators = RemoteContentValidators(etag: "\"abc123\"")
+        try model.recordRemoteRefreshSuccess(
+            remote.id,
+            at: Date(timeIntervalSince1970: 1_755_000_000),
+            validators: validators
+        )
+
+        try model.recordRemoteRefreshFailure(remote.id)
+
+        XCTAssertEqual(model.profile(remote.id)?.remoteRefreshState?.validators, validators)
+    }
+
+    func testRecordingARefreshFailureKeepsTheLastSuccessTime() throws {
+        let remote = makeRemoteProfile("remote")
+        var model = try makeModel(standaloneProfiles: [remote])
+        let succeededAt = Date(timeIntervalSince1970: 1_755_000_000)
+
+        try model.recordRemoteRefreshSuccess(remote.id, at: succeededAt)
+        try model.recordRemoteRefreshFailure(remote.id)
+
+        XCTAssertEqual(
+            model.profile(remote.id)?.remoteRefreshState,
+            RemoteRefreshState(lastSuccessAt: succeededAt, lastAttemptFailed: true)
+        )
+    }
+
+    func testRecordingAFailureWithoutAPriorSuccessMarksTheStateFailed() throws {
+        let remote = makeRemoteProfile("remote")
+        var model = try makeModel(standaloneProfiles: [remote])
+
+        try model.recordRemoteRefreshFailure(remote.id)
+
+        XCTAssertEqual(
+            model.profile(remote.id)?.remoteRefreshState,
+            RemoteRefreshState(lastSuccessAt: nil, lastAttemptFailed: true)
+        )
+    }
+
+    func testRecordingARefreshOnAnUnknownProfileIsRejected() throws {
+        var model = try makeModel()
+
+        XCTAssertThrowsError(try model.recordRemoteRefreshSuccess(.init("missing"), at: .now)) {
+            XCTAssertEqual($0 as? ActivationModelError, .unknownProfile(.init("missing")))
+        }
+    }
+
+    func testABodyOnlyContentUpdateKeepsTheRefreshState() throws {
+        let remote = makeRemoteProfile("remote")
+        var model = try makeModel(standaloneProfiles: [remote])
+        try model.recordRemoteRefreshSuccess(remote.id, at: Date(timeIntervalSince1970: 1_755_000_000))
+        let state = model.profile(remote.id)?.remoteRefreshState
+
+        try model.updateProfileContent(
+            remote.id,
+            content: remote.remoteHeader!.storedContent(forFetched: "9.9.9.9 changed.example.com\n")
+        )
+
+        XCTAssertNotNil(state)
+        XCTAssertEqual(model.profile(remote.id)?.remoteRefreshState, state)
+    }
+
+    func testAnIntervalOnlyHeaderEditKeepsTheRefreshState() throws {
+        let remote = makeRemoteProfile("remote")
+        var model = try makeModel(standaloneProfiles: [remote])
+        try model.recordRemoteRefreshSuccess(remote.id, at: Date(timeIntervalSince1970: 1_755_000_000))
+        let state = model.profile(remote.id)?.remoteRefreshState
+        let retimed = RemoteHeader(sourceURL: remote.remoteHeader!.sourceURL, interval: .oneHour)!
+
+        try model.updateProfileContent(remote.id, content: retimed.line + "\nbody\n")
+
+        XCTAssertEqual(model.profile(remote.id)?.remoteRefreshState, state)
+    }
+
+    func testChangingTheSourceURLClearsTheRefreshState() throws {
+        let remote = makeRemoteProfile("remote")
+        var model = try makeModel(standaloneProfiles: [remote])
+        try model.recordRemoteRefreshSuccess(remote.id, at: Date(timeIntervalSince1970: 1_755_000_000))
+        let retargeted = RemoteHeader(sourceURL: URL(string: "https://other.example.com/hosts.txt")!)!
+
+        try model.updateProfileContent(remote.id, content: retargeted.line + "\nbody\n")
+
+        XCTAssertNil(model.profile(remote.id)?.remoteRefreshState)
+    }
+
+    func testRemovingTheRemoteHeaderClearsTheRefreshState() throws {
+        // Convert to Local (#72) strips the header via updateProfileContent, so the runtime
+        // state clears without a dedicated call.
+        let remote = makeRemoteProfile("remote")
+        var model = try makeModel(standaloneProfiles: [remote])
+        try model.recordRemoteRefreshSuccess(remote.id, at: Date(timeIntervalSince1970: 1_755_000_000))
+
+        try model.updateProfileContent(remote.id, content: "1.2.3.4 kept.example.com\n")
+
+        XCTAssertNil(model.profile(remote.id)?.remoteRefreshState)
+    }
+
     private func makeProfile(_ id: String) -> Profile {
         Profile(id: .init(id), name: id.capitalized, content: "\(id.capitalized) hosts")
+    }
+
+    private func makeRemoteProfile(_ id: String) -> Profile {
+        let header = RemoteHeader(sourceURL: URL(string: "https://example.com/hosts.txt")!)!
+        return Profile(
+            id: .init(id),
+            name: id.capitalized,
+            content: header.storedContent(forFetched: "1.2.3.4 a.example.com\n")
+        )
     }
 
     private func makeGroup(_ id: String, profiles: [Profile]) -> Group {

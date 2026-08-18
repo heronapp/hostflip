@@ -76,10 +76,8 @@
 "Select for editing. Drag to move." = "選択して編集。ドラッグして移動。";
 "Activate %@" = "%@ を適用する";
 "Deactivate %@" = "%@ の適用を解除する";
-"Active" = "適用中";
+"Active" = "適用";
 "Inactive" = "未適用";
-"Saved Active" = "選択済み（一時停止中）";
-"Make Active" = "適用する";
 "Delete Profile" = "プロファイルを削除";
 "Group: %@ · One profile active at a time" = "グループ: %@ · 同時に適用できるのは 1 つのプロファイルのみ";
 "Standalone profile · Toggles independently" = "グループ外のプロファイル · 個別に切り替え";
@@ -119,6 +117,11 @@
 "The current /etc/hosts content is unavailable." = "現在の /etc/hosts の内容を取得できません。";
 "Protected · Read Only" = "保護済み · 読み出しのみ";
 "Always Active" = "常に適用";
+"Remote · Read Only" = "リモート · 読み出しのみ";
+"Refreshes every hour" = "1時間ごとに更新";
+"Refreshes every 6 hours" = "6時間ごとに更新";
+"Refreshes every 24 hours" = "24時間ごとに更新";
+"Manual refresh only" = "手動更新のみ";
 "Profile Name" = "プロファイル名";
 "Open Maintenance" = "メンテナンスを開く";
 
@@ -170,6 +173,10 @@
 "the export contains a profile or group with an empty name" = "書き出し内容に名前が空のプロファイルまたはグループが含まれています";
 "this file is not UTF-8 text" = "このファイルは UTF-8 テキストではありません";
 "Nothing was imported. %@: %@." = "何も読み込まれませんでした。%@: %@。";
+"Import Complete" = "読み込み完了";
+"Imported 1 profile." = "1 件のプロファイルを読み込みました。";
+"Imported %lld profiles." = "%lld 件のプロファイルを読み込みました。";
+"Remote profiles will fetch content from these URLs:" = "リモートプロファイルの内容は次の URL から取得されます:";
 
 /* Helper maintenance */
 "Helper Ready" = "ヘルパーは準備完了";
@@ -204,3 +211,58 @@
 /* Titlebar switch */
 "Resume hostflip" = "hostflip を再開";
 "Pause hostflip" = "hostflip を一時停止";
+
+/* Remote profile creation */
+"New Remote Profile…" = "新規リモートプロファイル…";
+"New Remote Profile" = "新規リモートプロファイル";
+"hostflip fetches hosts content from the Source URL and keeps the profile up to date. Remote content is read-only." = "hostflip はソース URL から hosts の内容を取得し、プロファイルを最新の状態に保ちます。リモートの内容は読み出しのみです。";
+"Source URL" = "ソース URL";
+"Name" = "名前";
+"Optional — the URL’s host" = "省略可 — URL のホスト名を使用";
+"Refresh" = "更新";
+"Every Hour" = "1時間ごと";
+"Every 6 Hours" = "6時間ごと";
+"Every 24 Hours" = "24時間ごと";
+"Manual Only" = "手動のみ";
+"Fetching…" = "取得中…";
+"Cancel" = "キャンセル";
+"Create" = "作成";
+"The workspace is not loaded." = "ワークスペースがまだ開かれていません。";
+"The Source URL must be an HTTPS address." = "ソース URL は HTTPS アドレスである必要があります。";
+"The URL redirected to a non-HTTPS address." = "URL が HTTPS 以外のアドレスにリダイレクトされました。";
+"The fetched content is larger than 10 MB." = "取得した内容が 10 MB を超えています。";
+"The fetched content is not UTF-8 text." = "取得した内容が UTF-8 テキストではありません。";
+"The URL returned a web page, not hosts content." = "URL が返したのは Web ページで、hosts の内容ではありません。";
+"The content could not be fetched: %@" = "内容を取得できませんでした: %@";
+"The Source URL could not be reached: %@" = "ソース URL に接続できませんでした: %@";
+"The server responded with HTTP %lld." = "サーバが HTTP %lld を返しました。";
+"The fetch was cancelled." = "取得はキャンセルされました。";
+
+/* Remote refresh */
+"Refresh Now" = "今すぐ更新";
+"Refresh All Remote Profiles" = "すべてのリモートプロファイルを更新";
+"Refreshing…" = "更新中…";
+"Refreshing %@" = "%@ を更新中";
+"Last refresh failed." = "前回の更新に失敗しました。";
+"Last successful refresh: %@" = "最後に成功した更新: %@";
+"No successful refresh yet." = "まだ更新に成功していません。";
+"Refreshed %@" = "%@に更新済み";
+"Refresh failed · content from %@" = "更新に失敗 · %@のコンテンツ";
+"Refresh failed" = "更新に失敗";
+"Not yet refreshed" = "未更新";
+
+/* Remote conversion and editing */
+"Edit Source URL & Interval…" = "ソース URL と更新間隔を編集…";
+"Convert to Local…" = "ローカルプロファイルに変換…";
+"Convert to Local Profile?" = "ローカルプロファイルに変換しますか？";
+"Convert to Local" = "ローカルプロファイルに変換";
+"The profile will stop fetching from %@. The current content stays as an editable local profile." = "このプロファイルは %@ からの取得を停止します。現在の内容は編集可能なローカルプロファイルとして残ります。";
+"Convert to Remote Profile?" = "リモートプロファイルに変換しますか？";
+"The edited first line is a Remote Header. Converting makes this a Remote Profile: its content is replaced by what the Source URL serves and becomes read-only. Keeping it local discards the edit." = "編集後の先頭行は Remote Header です。変換するとリモートプロファイルになり、内容はソース URL から取得した内容に置き換えられ、読み出しのみになります。ローカルのままにすると、この編集は破棄されます。";
+"Keep as Local" = "ローカルのままにする";
+"Convert" = "変換";
+"Edit Remote Profile" = "リモートプロファイルを編集";
+"Changing the Source URL fetches and validates the new address first; until that succeeds, the current Source URL and content stay." = "ソース URL を変更すると、まず新しいアドレスから取得して検証します。成功するまでは現在のソース URL と内容が維持されます。";
+"Save" = "保存";
+"The profile was changed outside this dialog." = "このダイアログの外でプロファイルが変更されました。";
+"The profile is no longer a remote profile." = "このプロファイルはリモートプロファイルではなくなっています。";

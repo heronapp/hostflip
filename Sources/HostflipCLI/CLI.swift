@@ -6,15 +6,17 @@ import HostflipXPC
 /// show canonical verbs only; any future aliases stay out of both.
 enum CLI {
     static let usageText = """
-        Usage: hostflip [--json] <command> [<profile>]
+        Usage: hostflip [--json] <command> [<argument>]
 
         Commands:
           status      Report the pause state, active profiles, and system hosts drift
+          doctor      Diagnose one hostname: profiles, merge, file, resolver, guidance
           list        List the group structure and every profile with its ID
           cat         Print a profile's content exactly as stored
           create      Create an empty profile: standalone by default, in a group via group/name
           write       Replace a profile's content from stdin or --file
           delete      Delete a profile; an active profile leaves the merge first
+          refresh     Refresh remote profiles from their Source URLs (all, or one target)
           activate    Activate a profile and rewrite the system hosts via the daemon
           deactivate  Deactivate a profile and rewrite the system hosts via the daemon
           pause       Rewrite the system hosts with Base Hosts only, keeping active state
@@ -22,6 +24,12 @@ enum CLI {
 
         Profiles are addressed by name, by group/profile path, or by --id when the
         name is ambiguous (names are not unique; IDs are — see 'hostflip list').
+        'refresh' may omit its target to refresh every remote profile: fetched
+        content is always saved to the workspace, and the system hosts is only
+        rewritten when an active profile changed — a write blocked by drift exits
+        3, an unavailable daemon exits 4, with the content kept either way.
+        'doctor' takes a hostname instead and is read-only: it never contacts the
+        daemon and exits 7 when the diagnosis finds an inconsistency.
 
         Options:
           --id <id>      Address a profile by its unique ID
@@ -36,6 +44,10 @@ enum CLI {
         workspaceRootDirectory: URL,
         systemHostsURL: URL,
         makeHostsMerger: @Sendable (Workspace) -> any HostsMerging = { DaemonHostsMerger(workspace: $0) },
+        resolveHostname: @Sendable (String) -> ResolverReply = { SystemResolver.query($0) },
+        fetchRemote: @escaping @Sendable (URL, RemoteContentValidators?) async throws -> RemoteFetchOutcome = {
+            try await RemoteFetcher().fetch(from: $0, validators: $1)
+        },
         postWorkspaceChanged: @escaping @Sendable (Workspace) -> Void = CLI.postDistributedWorkspaceChange,
         readStandardInput: @Sendable () throws -> Data = { try FileHandle.standardInput.readToEnd() ?? Data() }
     ) async -> CLIResult {
@@ -56,6 +68,8 @@ enum CLI {
                     workspace: Workspace(rootDirectory: workspaceRootDirectory),
                     systemHostsURL: systemHostsURL,
                     makeHostsMerger: makeHostsMerger,
+                    resolveHostname: resolveHostname,
+                    fetchRemote: fetchRemote,
                     postWorkspaceChanged: postWorkspaceChanged,
                     readStandardInput: readStandardInput
                 )
@@ -68,7 +82,11 @@ enum CLI {
             } else {
                 output = payload.humanText + "\n"
             }
-            return CLIResult(exitCode: .success, standardOutput: output, standardError: "")
+            return CLIResult(
+                exitCode: payload.exitCode,
+                standardOutput: output,
+                standardError: wantsJSON ? "" : payload.humanStandardError
+            )
         } catch {
             let normalized = normalize(error)
             return CLIResult(
@@ -133,6 +151,8 @@ enum CLI {
         workspace: Workspace,
         systemHostsURL: URL,
         makeHostsMerger: @Sendable (Workspace) -> any HostsMerging,
+        resolveHostname: @Sendable (String) -> ResolverReply,
+        fetchRemote: @escaping @Sendable (URL, RemoteContentValidators?) async throws -> RemoteFetchOutcome,
         postWorkspaceChanged: @escaping @Sendable (Workspace) -> Void,
         readStandardInput: @Sendable () throws -> Data
     ) async throws -> any CommandPayload {
@@ -146,6 +166,13 @@ enum CLI {
         case "status":
             try requireNoArguments(in: invocation)
             return try StatusCommand.run(workspace: workspace, systemHostsURL: systemHostsURL)
+        case "doctor":
+            return try DoctorCommand.run(
+                hostname: requireHostname(in: invocation),
+                workspace: workspace,
+                systemHostsURL: systemHostsURL,
+                resolveHostname: resolveHostname
+            )
         case "list":
             try requireNoArguments(in: invocation)
             return try ListCommand.run(workspace: workspace)
@@ -176,6 +203,15 @@ enum CLI {
                 workspace: workspace,
                 systemHostsURL: systemHostsURL,
                 merger: makeHostsMerger(workspace),
+                postWorkspaceChanged: postWorkspaceChanged
+            )
+        case "refresh":
+            return try await RefreshCommand.run(
+                reference: optionalProfileReference(in: invocation),
+                workspace: workspace,
+                systemHostsURL: systemHostsURL,
+                merger: makeHostsMerger(workspace),
+                fetchRemote: fetchRemote,
                 postWorkspaceChanged: postWorkspaceChanged
             )
         // "on"/"off" are entry aliases only: they always require the profile argument (a bare
@@ -229,6 +265,41 @@ enum CLI {
         return target
     }
 
+    /// Extracts doctor's one positional hostname. doctor addresses a hostname, never a
+    /// profile, so the --id addressing form has no meaning here and is rejected.
+    private static func requireHostname(in invocation: Invocation) throws -> String {
+        if invocation.profileID != nil {
+            throw CLIError.usage("unexpected option '--id'")
+        }
+        let positionals = invocation.commandArguments.dropFirst()
+        if let extra = positionals.dropFirst().first {
+            throw CLIError.usage("unexpected argument '\(extra)'")
+        }
+        guard let hostname = positionals.first else {
+            throw CLIError.usage("'doctor' needs a hostname")
+        }
+        return hostname
+    }
+
+    /// Extracts refresh's optional profile reference: at most one of a positional name/path
+    /// or --id; nil (no target at all) means "every remote profile".
+    private static func optionalProfileReference(in invocation: Invocation) throws -> ProfileReference? {
+        let positionals = invocation.commandArguments.dropFirst()
+        if let extra = positionals.dropFirst().first {
+            throw CLIError.usage("unexpected argument '\(extra)'")
+        }
+        switch (positionals.first, invocation.profileID) {
+        case (let reference?, nil):
+            return .nameOrPath(reference)
+        case (nil, let id?):
+            return .id(id)
+        case (nil, nil):
+            return nil
+        case (.some, .some):
+            throw CLIError.usage("give a profile name or --id, not both")
+        }
+    }
+
     /// Extracts the one profile reference of a profile-addressed command: exactly one of a
     /// positional name/path or --id.
     private static func requireProfileReference(
@@ -266,7 +337,9 @@ enum CLI {
 
     // MARK: - Error rendering
 
-    private static func normalize(_ error: any Error) -> CLIError {
+    /// Internal rather than private: refresh (#73) reports write-layer failures through the
+    /// same mapping in its result instead of failing the whole command.
+    static func normalize(_ error: any Error) -> CLIError {
         switch error {
         case let error as CLIError:
             return error
@@ -297,6 +370,14 @@ enum CLI {
             )
         case let error as DaemonChannelError:
             return normalize(error)
+        case let error as ConfirmedWriteBaselineError:
+            // The write itself landed: the message must say so, or the caller would undo or
+            // retry a change that is already live.
+            return CLIError(
+                code: "baseline-record-failed",
+                message: "the system hosts was updated, but the write baseline could not be recorded: \(String(describing: error.underlying)); 'hostflip status' may report drift until the next successful write",
+                exitCode: .failure
+            )
         default:
             return CLIError(code: "internal-error", message: error.localizedDescription, exitCode: .failure)
         }
@@ -304,8 +385,10 @@ enum CLI {
 
     /// Maps a daemon channel failure onto the exit-code contract: drift means "stop and hand
     /// back to a human" (3), an unreachable or restarting daemon is "not ready" (4), everything
-    /// else is a general failure with a string code integrations can key on.
-    private static func normalize(_ error: DaemonChannelError) -> CLIError {
+    /// else is a general failure with a string code integrations can key on. Internal rather
+    /// than private: refresh (#73) reports a blocked write through this mapping in its result
+    /// instead of failing the whole command.
+    static func normalize(_ error: DaemonChannelError) -> CLIError {
         switch error {
         case .mergeRejected(.hostsDrift):
             return .hostsDrift

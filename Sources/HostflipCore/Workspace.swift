@@ -135,7 +135,12 @@ public struct Workspace: Sendable {
         func writeProfileFile(for profile: Profile) throws -> ManifestProfile {
             let fileName = fileNames[profile.id]!
             try write(profile.content, to: profilesDirectory.appendingPathComponent(fileName))
-            return ManifestProfile(id: profile.id.rawValue, name: profile.name, file: fileName)
+            return ManifestProfile(
+                id: profile.id.rawValue,
+                name: profile.name,
+                file: fileName,
+                remoteRefresh: profile.remoteRefreshState
+            )
         }
 
         let manifest = try Manifest(
@@ -223,6 +228,9 @@ public struct Workspace: Sendable {
     private func writeManifest(_ manifest: Manifest) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        // ISO8601 keeps the remote refresh timestamps human-readable in manifest.json; the
+        // manifest had no date fields before, so the strategy changes no existing key.
+        encoder.dateEncodingStrategy = .iso8601
         try encoder.encode(manifest).write(to: manifestURL, options: .atomic)
     }
 
@@ -263,7 +271,9 @@ public struct Workspace: Sendable {
     // MARK: - Loading
 
     private func loadManifest() throws -> Manifest {
-        try JSONDecoder().decode(Manifest.self, from: Data(contentsOf: manifestURL))
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(Manifest.self, from: Data(contentsOf: manifestURL))
     }
 
     private func load() throws -> ActivationModel {
@@ -277,7 +287,8 @@ public struct Workspace: Sendable {
                 content: String(
                     contentsOf: profilesDirectory.appendingPathComponent(entry.file),
                     encoding: .utf8
-                )
+                ),
+                remoteRefreshState: entry.remoteRefresh
             )
         }
 
@@ -448,6 +459,10 @@ private struct ManifestProfile: Codable {
     var id: String
     var name: String
     var file: String
+    /// Runtime state of a Remote Profile's refreshes (ADR-0012): optional and discardable —
+    /// an app version without this field strips it on its next save, losing nothing but
+    /// display state (the subscription lives in the content's Remote Header).
+    var remoteRefresh: RemoteRefreshState?
 }
 
 private struct ManifestGroup: Codable {

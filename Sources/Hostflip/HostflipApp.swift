@@ -10,6 +10,8 @@ struct HostflipApp: App {
     private var applicationDelegate
 
     private let store: WorkspaceStore
+    /// Keeps scheduled Remote Profile refreshes armed for the app's lifetime (#71).
+    private let remoteRefreshScheduler: RemoteRefreshScheduler
     private let maintenanceStore: MaintenanceStore
     private let dockIconStore: DockIconVisibilityStore
     private let launchAtLoginStore = LaunchAtLoginStore()
@@ -32,7 +34,19 @@ struct HostflipApp: App {
             userDriverDelegate: nil
         )
         store.loadIfNeeded()
+        // Wired after the load so the first resync doubles as the startup catch-up: every
+        // profile whose interval already elapsed refreshes once (#71); afterwards the model's
+        // change hook keeps the schedule current through every edit and refresh result.
+        let remoteRefreshScheduler = RemoteRefreshScheduler(
+            entries: { [weak store] in store?.remoteScheduleEntries ?? [] },
+            refresh: { [weak store] profileID in await store?.refreshRemoteProfile(profileID) }
+        )
+        store.remoteScheduleChanged = { [weak remoteRefreshScheduler] in
+            remoteRefreshScheduler?.resync()
+        }
+        remoteRefreshScheduler.resync()
         self.store = store
+        self.remoteRefreshScheduler = remoteRefreshScheduler
         self.maintenanceStore = maintenanceStore
         self.dockIconStore = dockIconStore
         // Recheck the actual registration status on every launch and re-register as needed (self-heal on version change, #19)
@@ -65,6 +79,7 @@ struct HostflipApp: App {
         .defaultSize(width: 820, height: 560)
         .commands {
             ImportExportCommands(store: store)
+            RemoteRefreshCommands(store: store)
         }
 
         Settings {
@@ -192,7 +207,19 @@ private struct MenuBarContent: View {
         )) {
             Text(menuItemTitle(profile.name))
         }
+        .badge(remoteRefreshFailureBadge(profile))
         .disabled(store.isPaused || store.isSwitching || store.hasHostsDrift)
+    }
+
+    /// Passive failure marker on a Remote Profile's menu entry (#70): the warning sign plus
+    /// the last successful refresh time. Menu rows cannot show tooltips, so the badge carries
+    /// both facts; a healthy profile shows no badge.
+    private func remoteRefreshFailureBadge(_ profile: Profile) -> Text? {
+        guard profile.isRemote,
+              let state = profile.remoteRefreshState,
+              state.lastAttemptFailed else { return nil }
+        guard let succeededAt = state.lastSuccessAt else { return Text(verbatim: "⚠︎") }
+        return Text(verbatim: "⚠︎ \(succeededAt.formatted(.relative(presentation: .named)))")
     }
 
     /// Modern macOS no longer dims disabled menu rows with custom labels, so

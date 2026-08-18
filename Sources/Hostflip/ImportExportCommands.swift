@@ -1,4 +1,5 @@
 import AppKit
+import HostflipCore
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -28,9 +29,36 @@ struct ImportExportCommands: Commands {
         panel.canChooseDirectories = false
         NSApp.activate()
         guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
-        if case .failed(let message) = store.importFiles(at: panel.urls) {
+        switch store.importFiles(at: panel.urls) {
+        case .imported(let summary):
+            presentImportSummary(summary)
+        case .failed(let message):
             presentError(title: String(localized: "Import Failed"), message: message)
         }
+    }
+
+    /// The import summary alert (#69): the profile count, plus the summary's Source URLs as a
+    /// paragraph of their own — omitted when nothing in the batch is remote (why the URLs must
+    /// be shown at all is documented on ImportSummary).
+    @MainActor
+    private func presentImportSummary(_ summary: ImportSummary) {
+        let alert = NSAlert()
+        alert.messageText = String(localized: "Import Complete")
+        var paragraphs = [
+            summary.profileCount == 1
+                ? String(localized: "Imported 1 profile.")
+                : String(localized: "Imported \(summary.profileCount) profiles.")
+        ]
+        if !summary.remoteSourceURLs.isEmpty {
+            paragraphs.append(
+                String(localized: "Remote profiles will fetch content from these URLs:")
+                    + "\n" + summary.remoteSourceURLs.joined(separator: "\n")
+            )
+        }
+        alert.informativeText = paragraphs.joined(separator: "\n\n")
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: String(localized: "OK"))
+        alert.runModal()
     }
 
     @MainActor

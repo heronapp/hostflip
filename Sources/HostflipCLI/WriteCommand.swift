@@ -2,6 +2,8 @@ import Foundation
 import HostflipCore
 
 /// `hostflip write <profile>`: replaces a profile's content whole, from stdin or `--file`.
+/// A Remote Profile is refused outright — remote content is read-only everywhere (ADR-0012),
+/// and a write could silently strip the Remote Header, which only Convert to Local may do.
 /// The new content must pass the structural hosts validation before anything happens; a
 /// rejected write leaves the stored content untouched. Writing an active profile changes the
 /// merged system hosts output, so it takes the shared daemon path (drift gate, merge, then
@@ -34,6 +36,16 @@ enum WriteCommand {
         let model = try workspace.openReadOnly()
         let match = try ProfileResolver.resolve(reference, in: model)
         let profileID = match.profile.id
+        // Checked before the content is even read: a remote target is invalid no matter what
+        // would be written.
+        if match.profile.isRemote {
+            let reference = match.groupName.map { "\($0)/\(match.profile.name)" } ?? match.profile.name
+            throw CLIError(
+                code: "profile-is-remote",
+                message: "'\(reference)' is a remote profile; its content is read-only and comes from its source URL",
+                exitCode: .failure
+            )
+        }
         let content = try readContent(filePath: filePath, readStandardInput: readStandardInput)
         if let line = HostsSyntax.firstIncompleteLine(in: content) {
             throw CLIError(

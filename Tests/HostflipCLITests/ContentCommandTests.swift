@@ -347,6 +347,33 @@ final class ContentCommandTests: XCTestCase {
         XCTAssertEqual(try reloadProfile("solo-id").content, "# solo")
     }
 
+    func testWriteToARemoteProfileIsRefusedLeavingTheContentUntouched() async throws {
+        try makeInitializedWorkspace()
+        let workspace = Workspace(rootDirectory: workspaceRootDirectory)
+        let remoteContent = "#!hostflip-remote https://example.com/hosts.txt interval=6h\n1.2.3.4 a.example.com\n"
+        _ = try workspace.save(applying: {
+            try $0.addProfile(id: .init("remote-id"), name: "Remote", content: remoteContent)
+        })
+        let merger = MergerStub()
+        let spy = WorkspaceChangeSpy()
+
+        // Remote content is read-only everywhere (ADR-0012); the CLI must not offer the write
+        // path the GUI editor already withholds.
+        let result = await invoke(
+            "--json", "write", "Remote",
+            standardInput: Data("0.0.0.0 ads.example.com\n".utf8),
+            merger: merger,
+            onWorkspaceChanged: spy
+        )
+
+        XCTAssertEqual(result.exitCode, .failure)
+        let details = try XCTUnwrap(try jsonObject(result.standardError)["error"] as? [String: Any])
+        XCTAssertEqual(details["code"] as? String, "profile-is-remote")
+        XCTAssertEqual(try reloadProfile("remote-id").content, remoteContent)
+        XCTAssertEqual(merger.recordedRequests.count, 0)
+        XCTAssertEqual(spy.postCount, 0)
+    }
+
     func testWriteAnUnknownProfileExitsFive() async throws {
         try makeInitializedWorkspace()
 

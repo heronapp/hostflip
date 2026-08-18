@@ -166,6 +166,63 @@ final class CLITests: XCTestCase {
         XCTAssertEqual(result.standardOutput, "No profiles.\n")
     }
 
+    func testListAnnotatesRemoteProfilesWithTheirSourceURLAndInterval() async throws {
+        try makeRemoteProfileWorkspace()
+
+        let result = await invoke("list")
+
+        XCTAssertEqual(result.exitCode, .success)
+        XCTAssertEqual(result.standardOutput, """
+            Solo    solo-id
+            Remote  remote-id  [remote: https://example.com/hosts.txt, 6h]
+            Work/   work-id
+              Dev   dev-id
+
+            """)
+    }
+
+    func testListJSONCarriesRemoteMetadataAndOmitsItForLocalProfiles() async throws {
+        try makeRemoteProfileWorkspace()
+
+        let result = await invoke("--json", "list")
+
+        XCTAssertEqual(result.exitCode, .success)
+        let standalone = try XCTUnwrap(try jsonObject(result.standardOutput)["standaloneProfiles"] as? [[String: Any]])
+        let solo = try XCTUnwrap(standalone.first { $0["id"] as? String == "solo-id" })
+        XCTAssertNil(solo["remote"], "a local profile carries no remote key")
+        let remote = try XCTUnwrap(standalone.first { $0["id"] as? String == "remote-id" }?["remote"] as? [String: Any])
+        XCTAssertEqual(remote["url"] as? String, "https://example.com/hosts.txt")
+        XCTAssertEqual(remote["interval"] as? String, "6h")
+        XCTAssertEqual(remote["lastSuccessAt"] as? String, "2025-08-18T06:53:20Z")
+        XCTAssertEqual(remote["lastAttemptFailed"] as? Bool, false)
+    }
+
+    func testListJSONReportsANeverRefreshedRemoteProfileWithNullSuccessTime() async throws {
+        let workspace = Workspace(rootDirectory: workspaceRootDirectory)
+        _ = try workspace.open(systemHosts: { capturedHosts })
+        let model = try ActivationModel(
+            baseHosts: BaseHosts(content: capturedHosts),
+            standaloneProfiles: [
+                Profile(
+                    id: .init("remote-id"),
+                    name: "Remote",
+                    content: "#!hostflip-remote https://example.com/hosts.txt interval=manual\n",
+                    remoteRefreshState: RemoteRefreshState(lastAttemptFailed: true)
+                ),
+            ],
+            groups: []
+        )
+        try workspace.save(model)
+
+        let result = await invoke("--json", "list")
+
+        XCTAssertEqual(result.exitCode, .success)
+        let standalone = try XCTUnwrap(try jsonObject(result.standardOutput)["standaloneProfiles"] as? [[String: Any]])
+        let remote = try XCTUnwrap(standalone.first?["remote"] as? [String: Any])
+        XCTAssertEqual(remote["lastSuccessAt"] as? NSNull, NSNull(), "no success yet is an explicit null, not an absent key")
+        XCTAssertEqual(remote["lastAttemptFailed"] as? Bool, true)
+    }
+
     // MARK: - cat
 
     func testCatByNamePrintsTheProfileContentVerbatim() async throws {
@@ -224,6 +281,31 @@ final class CLITests: XCTestCase {
         XCTAssertEqual(object["name"] as? String, "Dev")
         XCTAssertEqual(object["group"] as? String, "Work")
         XCTAssertEqual(object["content"] as? String, "# dev")
+    }
+
+    func testCatARemoteProfileReportsRemoteMetadataAndTheHeaderLeadsTheContent() async throws {
+        try makeRemoteProfileWorkspace()
+
+        let result = await invoke("--json", "cat", "Remote")
+
+        XCTAssertEqual(result.exitCode, .success)
+        let object = try jsonObject(result.standardOutput)
+        XCTAssertEqual(
+            object["content"] as? String,
+            "#!hostflip-remote https://example.com/hosts.txt interval=6h\n1.2.3.4 a.example.com\n",
+            "the verbatim content leads with the header line, so the human output shows it too"
+        )
+        let remote = try XCTUnwrap(object["remote"] as? [String: Any])
+        XCTAssertEqual(remote["url"] as? String, "https://example.com/hosts.txt")
+        XCTAssertEqual(remote["interval"] as? String, "6h")
+        XCTAssertEqual(
+            remote["lastSuccessAt"] as? String,
+            "2025-08-18T06:53:20Z",
+            "cat shares the remote metadata shape with list, Freshness fields included"
+        )
+
+        let local = await invoke("--json", "cat", "Solo")
+        XCTAssertNil(try jsonObject(local.standardOutput)["remote"], "a local profile carries no remote key")
     }
 
     func testCatUnknownReferenceFailsWithNotFoundExitCode() async throws {
@@ -431,6 +513,8 @@ final class CLITests: XCTestCase {
         XCTAssertEqual(ExitCode.daemonUnavailable.rawValue, 4)
         XCTAssertEqual(ExitCode.notFound.rawValue, 5)
         XCTAssertEqual(ExitCode.ambiguous.rawValue, 6)
+        // doctor's three-state verdict (ADR-0014): 0 consistent, 7 findings, 1 tool failure.
+        XCTAssertEqual(ExitCode.inconsistent.rawValue, 7)
     }
 
     // MARK: - Helpers
@@ -464,6 +548,34 @@ final class CLITests: XCTestCase {
         try workspace.save(model)
         try Data(capturedHosts.utf8).write(to: systemHostsURL)
         return workspace
+    }
+
+    /// Initializes a workspace where the standalone "Remote" is a Remote Profile (its content's
+    /// first line is a Remote Header) next to local content in both containers.
+    private func makeRemoteProfileWorkspace() throws {
+        let workspace = Workspace(rootDirectory: workspaceRootDirectory)
+        _ = try workspace.open(systemHosts: { capturedHosts })
+        let model = try ActivationModel(
+            baseHosts: BaseHosts(content: capturedHosts),
+            standaloneProfiles: [
+                Profile(id: .init("solo-id"), name: "Solo", content: "# solo"),
+                Profile(
+                    id: .init("remote-id"),
+                    name: "Remote",
+                    content: "#!hostflip-remote https://example.com/hosts.txt interval=6h\n1.2.3.4 a.example.com\n",
+                    remoteRefreshState: RemoteRefreshState(
+                        lastSuccessAt: Date(timeIntervalSince1970: 1_755_500_000)
+                    )
+                ),
+            ],
+            groups: [
+                Group(id: .init("work-id"), name: "Work", profiles: [
+                    Profile(id: .init("dev-id"), name: "Dev", content: "# dev"),
+                ]),
+            ]
+        )
+        try workspace.save(model)
+        try Data(capturedHosts.utf8).write(to: systemHostsURL)
     }
 
     /// Initializes a workspace where the bare name "Dev" is ambiguous between a standalone
