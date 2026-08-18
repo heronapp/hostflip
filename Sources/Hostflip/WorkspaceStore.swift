@@ -53,9 +53,46 @@ enum HostsReconciliationChoice {
     case later
 }
 
-/// Result of one import (#40): either every file was applied, or none was.
+/// Result of one import (#40): either every file was applied — summarized for the user (#69) —
+/// or none was.
 enum ImportOutcome: Equatable {
-    case imported
+    case imported(ImportSummary)
+    case failed(String)
+}
+
+/// Result of the create-remote-profile flow (ADR-0012): success dismisses the dialog and selects
+/// the new profile; failure keeps it open with display copy so the user can retry or cancel.
+enum RemoteProfileCreationOutcome: Equatable {
+    case created(Profile.ID)
+    case failed(String)
+}
+
+/// A local profile's edit whose new first line parses as a Remote Header, held for confirmation
+/// (ADR-0012): the stored content stays untouched until the user confirms and the validation
+/// fetch passes, so an accidental header can never flip a profile silently.
+struct PendingRemoteConversion: Equatable {
+    let profileID: Profile.ID
+    /// The full edited content as typed; shown in the editor while the confirmation is up, and
+    /// discarded whole on cancel or failure.
+    let draftContent: String
+    /// The stored content the draft was typed over: confirming validates against it under the
+    /// manifest lock, so a conversion can never overwrite what an external writer saved while
+    /// the validation fetch was in flight.
+    let baselineContent: String
+    let header: RemoteHeader
+}
+
+/// Result of confirming a held local→remote conversion: success dismisses the dialog; failure
+/// keeps the draft held with display copy so the user can retry or cancel.
+enum RemoteConversionOutcome: Equatable {
+    case converted
+    case failed(String)
+}
+
+/// Result of editing a Remote Profile's Source URL or interval (ADR-0012): failure carries
+/// display copy and leaves the old header and content untouched.
+enum RemoteProfileEditOutcome: Equatable {
+    case updated
     case failed(String)
 }
 
@@ -69,7 +106,15 @@ enum ImportOutcome: Equatable {
 @MainActor
 @Observable
 final class WorkspaceStore {
-    private(set) var model: ActivationModel?
+    /// Every mutation path assigns through here (the model is a struct, so in-place edits
+    /// set it too), making didSet the single choke point that keeps the refresh scheduler's
+    /// view current (#71) — interval edits, refresh results, and external changes included.
+    private(set) var model: ActivationModel? {
+        didSet { remoteScheduleChanged?() }
+    }
+    /// Pokes the refresh scheduler after any model change; wired at launch, nil in tests
+    /// that exercise the store alone.
+    @ObservationIgnored var remoteScheduleChanged: (() -> Void)?
     /// Display copy for a failed workspace open (e.g. leftover content that needs manual handling).
     private(set) var loadError: String?
     /// The most recent local workspace save failure; stays nil on success (silent).
@@ -99,6 +144,27 @@ final class WorkspaceStore {
     private let readSystemHosts: @Sendable () throws -> Data
     /// Entry point for approval guidance (opens the Login Items pane in System Settings); tests inject a no-op.
     private let openApproval: @Sendable () -> Void
+    /// Fetches and validates a Source URL's content (RemoteFetcher), conditionally when
+    /// stored validators are passed (#71); tests inject canned outcomes.
+    private let fetchRemote: @Sendable (URL, RemoteContentValidators?) async throws -> RemoteFetchOutcome
+    /// Clock for recording refresh success times; tests inject a fixed date.
+    private let now: @Sendable () -> Date
+    /// Remote Profiles with a refresh in flight: their refresh entries are disabled and their
+    /// rows show a spinner instead of the failure marker.
+    private(set) var refreshingProfileIDs: Set<Profile.ID> = []
+    /// When each Remote Profile's refresh last actually started — manual and scheduled alike
+    /// (#71) — in-memory only: the scheduler spaces the next attempt one interval after the
+    /// newest one, so a failing source is not re-fetched on every evaluation and a manual
+    /// failure is not immediately followed by a scheduled retry. Reset by a relaunch, so the
+    /// startup catch-up retries an overdue failing profile once.
+    @ObservationIgnored private var remoteRefreshAttempts: [Profile.ID: Date] = [:]
+    /// Display copy for each profile's most recent refresh failure, in-memory only — the
+    /// manifest persists just the failed flag, so after a relaunch the marker shows without
+    /// the detailed copy.
+    private(set) var remoteRefreshErrors: [Profile.ID: String] = [:]
+    /// A local profile's edit held for local→remote confirmation (ADR-0012); nil while no
+    /// conversion dialog is up.
+    private(set) var pendingRemoteConversion: PendingRemoteConversion?
     /// The in-flight follow-up merge task; tests await its completion before asserting the result.
     private(set) var followUpMergeTask: Task<Void, Never>?
     private var hostsDriftGeneration = 0
@@ -147,13 +213,19 @@ final class WorkspaceStore {
         driftMonitor: (any HostsDriftMonitoring)? = nil,
         readSystemHosts: @escaping @Sendable () throws -> Data = {
             try Data(contentsOf: URL(fileURLWithPath: "/etc/hosts"))
-        }
+        },
+        fetchRemote: @escaping @Sendable (URL, RemoteContentValidators?) async throws -> RemoteFetchOutcome = { url, validators in
+            try await RemoteFetcher().fetch(from: url, validators: validators)
+        },
+        now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.workspace = workspace
         self.coordinator = coordinator
         self.openApproval = openApproval
         self.driftMonitor = driftMonitor
         self.readSystemHosts = readSystemHosts
+        self.fetchRemote = fetchRemote
+        self.now = now
     }
 
     /// Idempotent open: the first call captures or restores the workspace; later calls reuse the in-memory model.
@@ -294,8 +366,37 @@ final class WorkspaceStore {
     }
 
     func updateProfileContent(_ profileID: Profile.ID, content: String) {
-        guard let profile = profile(profileID), profile.content != content else { return }
+        guard let profile = profile(profileID) else { return }
+        guard profile.content != content else {
+            // E.g. an undo back to the stored content while a conversion was pending.
+            clearPendingRemoteConversion(for: profileID)
+            return
+        }
+        // Remote content only changes through Refresh or the remote-profile edits (ADR-0012),
+        // mirroring the CLI's write refusal; the editor is read-only for remote profiles anyway.
+        guard !profile.isRemote else { return }
+        // A local profile whose new first line reads as a Remote Header must not flip silently:
+        // hold the edit and let the confirmation dialog decide (ADR-0012).
+        if let header = RemoteHeader.parse(fromContent: content) {
+            pendingRemoteConversion = PendingRemoteConversion(
+                profileID: profileID,
+                draftContent: content,
+                baselineContent: profile.content,
+                header: header
+            )
+            return
+        }
+        clearPendingRemoteConversion(for: profileID)
         applyEdit { try $0.updateProfileContent(profileID, content: content) }
+    }
+
+    /// The content the editor shows for a profile: the held conversion draft while its
+    /// confirmation is up, the stored content otherwise.
+    func editedProfileContent(_ profileID: Profile.ID) -> String {
+        if let pending = pendingRemoteConversion, pending.profileID == profileID {
+            return pending.draftContent
+        }
+        return profile(profileID)?.content ?? ""
     }
 
     /// Deleting a profile touches only the profile itself: Base Hosts and other profiles are unaffected.
@@ -335,6 +436,619 @@ final class WorkspaceStore {
             counter += 1
         }
         return candidate
+    }
+
+    // MARK: - Creating remote profiles (ADR-0012)
+
+    /// Creates a Remote Profile by fetching and validating the Source URL's content first: a
+    /// failed fetch or validation gate creates nothing, so no empty-shell remote profile can
+    /// exist. The profile lands inactive in the standalone area — a purely local edit; the
+    /// system hosts only changes once the user activates it.
+    func createRemoteProfile(
+        sourceURL: URL,
+        name: String,
+        interval: RemoteHeader.RefreshInterval
+    ) async -> RemoteProfileCreationOutcome {
+        guard model != nil else {
+            return .failed(String(localized: "The workspace is not loaded."))
+        }
+        guard let header = RemoteHeader(sourceURL: sourceURL, interval: interval) else {
+            return .failed(String(localized: "The Source URL must be an HTTPS address."))
+        }
+        let fetched: String
+        let fetchedValidators: RemoteContentValidators?
+        do {
+            (fetched, fetchedValidators) = try await fetchContent(from: sourceURL)
+        } catch {
+            // The dialog's Cancel cancels this task, which the fetcher surfaces as an
+            // ordinary transport error; report it as the cancellation it is.
+            if Task.isCancelled {
+                return .failed(String(localized: "The fetch was cancelled."))
+            }
+            return .failed(Self.remoteFetchFailureMessage(for: error))
+        }
+        // A cancellation that lands after the fetch succeeded must still mean "nothing is
+        // stored", so re-check before persisting.
+        guard !Task.isCancelled else {
+            return .failed(String(localized: "The fetch was cancelled."))
+        }
+        let profileID = Profile.ID(UUID().uuidString)
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let profileName = trimmedName.isEmpty ? defaultRemoteProfileName(for: sourceURL) : trimmedName
+        let fetchedAt = now()
+        let addProfile: (inout ActivationModel) throws -> Void = {
+            try $0.addProfile(
+                id: profileID,
+                name: profileName,
+                content: header.storedContent(forFetched: fetched)
+            )
+            // The dialog's validation fetch is the first successful refresh (ADR-0012).
+            try $0.recordRemoteRefreshSuccess(profileID, at: fetchedAt, validators: fetchedValidators)
+        }
+        // Committed only when the save succeeds (the importFiles precedent): fetched content
+        // is re-fetchable, so a disk failure must fail the dialog rather than leave an
+        // in-memory profile a relaunch would silently drop — which keeps this path off
+        // persistByReplaying and applyEdit. The profile lands inactive, so no follow-up
+        // merge is needed.
+        do {
+            if saveError == nil {
+                switch try workspace.save(applying: addProfile) {
+                case .saved(let saved):
+                    model = saved
+                case .conflict(let latest, let reason):
+                    model = latest
+                    throw reason
+                }
+            } else {
+                guard var updated = model else {
+                    return .failed(String(localized: "The workspace is not loaded."))
+                }
+                try addProfile(&updated)
+                try workspace.save(updated)
+                model = updated
+                saveError = nil
+            }
+        } catch {
+            return .failed(String(localized: "Save failed: \(String(describing: error))"))
+        }
+        return .created(profileID)
+    }
+
+    /// An omitted name falls back to the Source URL's host; like the other default names, it
+    /// avoids existing profile names so the sidebar can tell two Remote Profiles apart. A name
+    /// the user typed is taken verbatim (duplicates allowed, matching rename semantics).
+    private func defaultRemoteProfileName(for sourceURL: URL) -> String {
+        let existing = Set((model?.standaloneProfiles ?? []).map(\.name)
+            + (model?.groups ?? []).flatMap { $0.profiles.map(\.name) })
+        let base = sourceURL.host ?? "Remote"
+        var candidate = base
+        var counter = 2
+        while existing.contains(candidate) {
+            candidate = "\(base) \(counter)"
+            counter += 1
+        }
+        return candidate
+    }
+
+    private static func remoteFetchFailureMessage(for error: any Error) -> String {
+        guard let fetchError = error as? RemoteFetchError else {
+            return String(localized: "The content could not be fetched: \(String(describing: error))")
+        }
+        return switch fetchError {
+        case .notHTTPS:
+            String(localized: "The Source URL must be an HTTPS address.")
+        case .insecureRedirect:
+            String(localized: "The URL redirected to a non-HTTPS address.")
+        case .requestFailed(let message):
+            String(localized: "The Source URL could not be reached: \(message)")
+        case .httpStatus(let code):
+            String(localized: "The server responded with HTTP \(code).")
+        case .tooLarge:
+            String(localized: "The fetched content is larger than 10 MB.")
+        case .notUTF8:
+            String(localized: "The fetched content is not UTF-8 text.")
+        case .looksLikeHTML:
+            String(localized: "The URL returned a web page, not hosts content.")
+        }
+    }
+
+    // MARK: - Refreshing remote profiles (#70, ADR-0012)
+
+    /// Every Remote Profile wherever it lives; Refresh All and its command enablement iterate this.
+    var remoteProfiles: [Profile] {
+        guard let model else { return [] }
+        return (model.standaloneProfiles + model.groups.flatMap(\.profiles)).filter(\.isRemote)
+    }
+
+    /// The scheduler's view of the Remote Profiles (#71): each profile's interval, last
+    /// successful refresh time, and last started attempt, re-derived from the model on every
+    /// resync so interval edits and refresh results take effect immediately.
+    var remoteScheduleEntries: [RemoteRefreshSchedule.Entry] {
+        remoteProfiles.compactMap { profile in
+            profile.remoteHeader.map { header in
+                RemoteRefreshSchedule.Entry(
+                    profileID: profile.id,
+                    interval: header.interval,
+                    lastSuccessAt: profile.remoteRefreshState?.lastSuccessAt,
+                    lastAttemptAt: remoteRefreshAttempts[profile.id]
+                )
+            }
+        }
+    }
+
+    /// Refreshes one Remote Profile: fetch, then apply through the edit path. A failed fetch
+    /// keeps the old content and records the failure passively (row and menu bar markers — no
+    /// system notification); a successful fetch updates the workspace, and only a changed body
+    /// of an active, unpaused profile schedules the follow-up merge (mergeIfAuthorized: the
+    /// drift monitor's self-write suppression applies, and registration or approval prompts
+    /// can never trigger). Under unreconciled drift the merge attempt is rejected by the
+    /// daemon's existing gate, so the workspace still updates but the system hosts stays
+    /// untouched until reconciliation carries the content over.
+    func refreshRemoteProfile(_ profileID: Profile.ID) async {
+        guard !refreshingProfileIDs.contains(profileID),
+              let profile = profile(profileID),
+              let header = profile.remoteHeader else { return }
+        refreshingProfileIDs.insert(profileID)
+        defer { refreshingProfileIDs.remove(profileID) }
+        remoteRefreshAttempts[profileID] = now()
+        // The last recorded success plus the stored body identify the content revision this
+        // fetch starts from: a concurrent writer (e.g. the CLI) refreshing the same URL
+        // mid-flight bumps the time or the body, making this fetch's possibly older response
+        // stale — it must not overwrite the newer stored content or its validators. The body
+        // backs the timestamp up because the manifest stores whole seconds: two refreshes
+        // landing within one second would otherwise compare equal.
+        let baseline = RemoteRefreshBaseline(
+            lastSuccessAt: profile.remoteRefreshState?.lastSuccessAt,
+            body: RemoteHeader.storedBody(of: profile.content)
+        )
+        let outcome: RemoteFetchOutcome
+        do {
+            // Stored validators make the fetch conditional (#71): an unchanged source
+            // answers 304 instead of a full download.
+            outcome = try await fetchRemote(header.sourceURL, profile.remoteRefreshState?.validators)
+        } catch {
+            // A cancelled refresh is not the source's failure; record nothing.
+            guard !Task.isCancelled else { return }
+            recordRefreshFailure(
+                profileID,
+                fetchedFrom: header.sourceURL,
+                baseline: baseline,
+                message: Self.remoteFetchFailureMessage(for: error)
+            )
+            return
+        }
+        guard !Task.isCancelled else { return }
+        switch outcome {
+        case .content(let fetched, let validators):
+            applyRefreshedContent(
+                fetched,
+                validators: validators,
+                fetchedFrom: header.sourceURL,
+                baseline: baseline,
+                to: profileID
+            )
+        case .notModified(let validators):
+            recordRefreshNotModified(
+                of: profileID, fetchedFrom: header.sourceURL, baseline: baseline, validators: validators
+            )
+        }
+    }
+
+    /// Refreshes every Remote Profile; the fetches run concurrently and each result is
+    /// applied as it arrives.
+    func refreshAllRemoteProfiles() async {
+        await withTaskGroup(of: Void.self) { group in
+            for profileID in remoteProfiles.map(\.id) {
+                group.addTask { await self.refreshRemoteProfile(profileID) }
+            }
+        }
+    }
+
+    /// Thrown inside a replay closure when the profile the fetch was started for is gone, no
+    /// longer remote, now points at a different Source URL, or was refreshed by a concurrent
+    /// writer while the fetch was in flight (the success-time or body baseline moved): the
+    /// stale result is dropped through the replay-conflict path.
+    private struct StaleRemoteRefresh: Error {}
+
+    /// The content revision a fetch started from; see refreshRemoteProfile for why the body
+    /// backs the whole-second timestamp up.
+    private struct RemoteRefreshBaseline {
+        let lastSuccessAt: Date?
+        let body: String?
+
+        func matches(_ profile: Profile) -> Bool {
+            profile.remoteRefreshState?.lastSuccessAt == lastSuccessAt
+                && RemoteHeader.storedBody(of: profile.content) == body
+        }
+    }
+
+    private func applyRefreshedContent(
+        _ fetched: String,
+        validators: RemoteContentValidators?,
+        fetchedFrom sourceURL: URL,
+        baseline: RemoteRefreshBaseline,
+        to profileID: Profile.ID
+    ) {
+        var shouldMerge = false
+        let apply: (inout ActivationModel) throws -> Void = { [now] latest in
+            guard let profile = latest.profile(profileID),
+                  let header = profile.remoteHeader,
+                  header.sourceURL == sourceURL,
+                  baseline.matches(profile) else {
+                throw StaleRemoteRefresh()
+            }
+            let newBody = RemoteHeader.escapingEmbeddedHeader(in: fetched)
+            if RemoteHeader.storedBody(of: profile.content) != newBody {
+                try latest.updateProfileContent(
+                    profileID,
+                    content: header.storedContent(forFetched: fetched)
+                )
+                // "No change after header stripping" writes nothing to the system hosts; an
+                // inactive or paused profile updates the workspace only.
+                shouldMerge = latest.activeProfileIDs.contains(profileID) && !latest.isPaused
+            }
+            try latest.recordRemoteRefreshSuccess(profileID, at: now(), validators: validators)
+        }
+        // The comparison derives from the model; recompute it on every exit path (applyEdit's rule).
+        defer {
+            if hasHostsDrift {
+                refreshHostsDriftComparison()
+            }
+        }
+        do {
+            guard case .saved = try persistByReplaying(apply) else {
+                // Stale fetch dropped; any failure copy belongs to the old identity.
+                remoteRefreshErrors[profileID] = nil
+                return
+            }
+        } catch {
+            // The refreshed content stays in memory (persistByReplaying); only the disk write
+            // failed, and like applyEdit unpersisted content is not merged — including by a
+            // follow-up merge an earlier edit left pending, which would read it from the
+            // in-memory model when it fires.
+            followUpMergeTask?.cancel()
+            saveError = String(localized: "Save failed: \(String(describing: error))")
+            return
+        }
+        remoteRefreshErrors[profileID] = nil
+        if shouldMerge {
+            // The refreshed content supersedes any pending follow-up merge, like a new edit.
+            followUpMergeTask?.cancel()
+            scheduleFollowUpMerge()
+        }
+    }
+
+    private func recordRefreshFailure(
+        _ profileID: Profile.ID,
+        fetchedFrom sourceURL: URL,
+        baseline: RemoteRefreshBaseline,
+        message: String
+    ) {
+        let apply: (inout ActivationModel) throws -> Void = { latest in
+            // The failure belongs to the URL that was fetched: a profile deleted, converted,
+            // or retargeted mid-fetch must not inherit the old URL's failure marker — and a
+            // concurrent writer's newer success (a moved baseline) must not be marked failed
+            // by this older attempt.
+            guard let profile = latest.profile(profileID),
+                  profile.remoteHeader?.sourceURL == sourceURL,
+                  baseline.matches(profile) else {
+                throw StaleRemoteRefresh()
+            }
+            try latest.recordRemoteRefreshFailure(profileID)
+        }
+        // The comparison derives from the model; recompute it on every exit path (applyEdit's
+        // rule) — the replay may absorb external changes beyond the failure flag itself.
+        defer {
+            if hasHostsDrift {
+                refreshHostsDriftComparison()
+            }
+        }
+        do {
+            guard case .saved = try persistByReplaying(apply) else {
+                remoteRefreshErrors[profileID] = nil
+                return
+            }
+            remoteRefreshErrors[profileID] = message
+        } catch {
+            // The failed flag stays in memory; only the manifest write failed.
+            remoteRefreshErrors[profileID] = message
+            saveError = String(localized: "Save failed: \(String(describing: error))")
+        }
+    }
+
+    /// A 304 answer to a conditional refresh (#71): the stored content is current, so only
+    /// the success time advances — validator fields the answer resent replace the stored
+    /// ones (the rest stay), nothing merges, and any failure marker clears exactly as a full
+    /// successful download would clear it.
+    private func recordRefreshNotModified(
+        of profileID: Profile.ID,
+        fetchedFrom sourceURL: URL,
+        baseline: RemoteRefreshBaseline,
+        validators: RemoteContentValidators?
+    ) {
+        let apply: (inout ActivationModel) throws -> Void = { [now] latest in
+            // Like a stale fetch result: the 304 answers the URL (and content revision)
+            // that was asked about.
+            guard let profile = latest.profile(profileID),
+                  profile.remoteHeader?.sourceURL == sourceURL,
+                  baseline.matches(profile) else {
+                throw StaleRemoteRefresh()
+            }
+            try latest.recordRemoteRefreshSuccess(
+                profileID,
+                at: now(),
+                validators: RemoteContentValidators.merged(
+                    stored: profile.remoteRefreshState?.validators,
+                    refreshed: validators
+                )
+            )
+        }
+        // The comparison derives from the model; recompute it on every exit path (applyEdit's
+        // rule) — the replay may absorb external changes beyond the timestamp itself.
+        defer {
+            if hasHostsDrift {
+                refreshHostsDriftComparison()
+            }
+        }
+        do {
+            guard case .saved = try persistByReplaying(apply) else {
+                remoteRefreshErrors[profileID] = nil
+                return
+            }
+            remoteRefreshErrors[profileID] = nil
+        } catch {
+            // The success is recorded in memory; only the manifest write failed.
+            remoteRefreshErrors[profileID] = nil
+            saveError = String(localized: "Save failed: \(String(describing: error))")
+        }
+    }
+
+    // MARK: - Converting between local and remote (ADR-0012)
+
+    /// Confirms the held local→remote conversion: the Source URL is fetched and validated like
+    /// creation, and only a fully saved result makes the profile remote — with the fetched
+    /// content as the body and the validation fetch recorded as the first successful refresh.
+    /// Every failure — the fetch, an external change to the profile, or the save itself —
+    /// keeps the stored content and the held draft, so the dialog shows the copy and offers
+    /// retry or cancel.
+    func confirmRemoteConversion() async -> RemoteConversionOutcome {
+        guard let pending = pendingRemoteConversion else {
+            return .failed(String(localized: "The profile was changed outside this dialog."))
+        }
+        let fetched: String
+        let fetchedValidators: RemoteContentValidators?
+        switch await fetchContentForDialog(from: pending.header.sourceURL) {
+        case .fetched(let content, let validators): (fetched, fetchedValidators) = (content, validators)
+        case .refused(let message): return .failed(message)
+        }
+        guard pendingRemoteConversion == pending else {
+            return .failed(String(localized: "The profile was changed outside this dialog."))
+        }
+        let fetchedAt = now()
+        // Validated under the manifest lock against the content the draft was typed over: an
+        // external writer's mid-fetch save wins, and the stale conversion reports instead of
+        // overwriting it. The baseline check also covers deletion and a foreign conversion.
+        let outcome = saveValidatedRemoteChange { latest in
+            guard let current = latest.profile(pending.profileID),
+                  current.content == pending.baselineContent else {
+                throw StaleRemoteDialogEdit()
+            }
+            try latest.updateProfileContent(
+                pending.profileID,
+                content: pending.header.storedContent(forFetched: fetched)
+            )
+            try latest.recordRemoteRefreshSuccess(
+                pending.profileID, at: fetchedAt, validators: fetchedValidators
+            )
+        }
+        switch outcome {
+        case .saved:
+            pendingRemoteConversion = nil
+            return .converted
+        case .stale:
+            return .failed(String(localized: "The profile was changed outside this dialog."))
+        case .failed(let message):
+            return .failed(message)
+        }
+    }
+
+    /// Drops the held conversion draft: the profile's stored content was never touched, so
+    /// cancelling is purely forgetting the edit.
+    func cancelRemoteConversion() {
+        pendingRemoteConversion = nil
+    }
+
+    private func clearPendingRemoteConversion(for profileID: Profile.ID) {
+        if pendingRemoteConversion?.profileID == profileID {
+            pendingRemoteConversion = nil
+        }
+    }
+
+    /// Convert to Local (ADR-0012): strips the Remote Header line and keeps the last fetched
+    /// content as an ordinary editable local profile — the only way a Remote Profile stops
+    /// being remote, and one-way. Grouping and active state stay; the model clears the refresh
+    /// state with the header. The body is derived from the latest saved content under the
+    /// manifest lock, so what survives is genuinely the last fetched content even when an
+    /// external writer refreshed it moments ago; the stored body also keeps any escaped
+    /// embedded token escaped, so stripping one header can never expose another.
+    func convertRemoteProfileToLocal(_ profileID: Profile.ID) {
+        guard profile(profileID)?.isRemote == true else { return }
+        applyEdit { latest in
+            guard let current = latest.profile(profileID),
+                  let body = RemoteHeader.storedBody(of: current.content) else {
+                throw StaleRemoteDialogEdit()
+            }
+            try latest.updateProfileContent(profileID, content: body)
+        }
+        // The failure copy belongs to the Source URL the profile no longer fetches from.
+        remoteRefreshErrors[profileID] = nil
+    }
+
+    /// Applies an edited Source URL and/or interval to a Remote Profile (ADR-0012). A URL
+    /// change re-validates like creation: the new URL is fetched first and only a fully saved
+    /// result stores the new header and content — refresh state reset to this first success —
+    /// so any failure leaves the old Source URL's content untouched. An interval-only change
+    /// keeps the same Source URL: the header line is rewritten above the latest saved body
+    /// without a fetch, and the refresh state survives. Both paths re-validate under the
+    /// manifest lock that the profile still carries the header the dialog was opened for.
+    func editRemoteProfile(
+        _ profileID: Profile.ID,
+        sourceURL: URL,
+        interval: RemoteHeader.RefreshInterval
+    ) async -> RemoteProfileEditOutcome {
+        guard let profile = profile(profileID), let oldHeader = profile.remoteHeader else {
+            return .failed(String(localized: "The profile is no longer a remote profile."))
+        }
+        guard let newHeader = RemoteHeader(sourceURL: sourceURL, interval: interval) else {
+            return .failed(String(localized: "The Source URL must be an HTTPS address."))
+        }
+        guard newHeader != oldHeader else { return .updated }
+
+        let outcome: RemoteDialogSaveOutcome
+        if newHeader.sourceURL == oldHeader.sourceURL {
+            outcome = saveValidatedRemoteChange { latest in
+                guard let current = latest.profile(profileID),
+                      current.remoteHeader?.sourceURL == oldHeader.sourceURL,
+                      let body = RemoteHeader.storedBody(of: current.content) else {
+                    throw StaleRemoteDialogEdit()
+                }
+                try latest.updateProfileContent(profileID, content: newHeader.line + "\n" + body)
+            }
+        } else {
+            let fetched: String
+            let fetchedValidators: RemoteContentValidators?
+            switch await fetchContentForDialog(from: newHeader.sourceURL) {
+            case .fetched(let content, let validators): (fetched, fetchedValidators) = (content, validators)
+            case .refused(let message): return .failed(message)
+            }
+            let fetchedAt = now()
+            outcome = saveValidatedRemoteChange { latest in
+                guard latest.profile(profileID)?.remoteHeader?.sourceURL
+                    == oldHeader.sourceURL else {
+                    throw StaleRemoteDialogEdit()
+                }
+                try latest.updateProfileContent(
+                    profileID,
+                    content: newHeader.storedContent(forFetched: fetched)
+                )
+                try latest.recordRemoteRefreshSuccess(
+                    profileID, at: fetchedAt, validators: fetchedValidators
+                )
+            }
+        }
+        switch outcome {
+        case .saved:
+            if newHeader.sourceURL != oldHeader.sourceURL {
+                // The failure copy belongs to the old Source URL; an interval-only edit keeps
+                // it, like it keeps the rest of the refresh state.
+                remoteRefreshErrors[profileID] = nil
+            }
+            return .updated
+        case .stale:
+            return .failed(String(localized: "The profile was changed outside this dialog."))
+        case .failed(let message):
+            return .failed(message)
+        }
+    }
+
+    /// Thrown inside a replay closure when the profile a dialog operation was validated
+    /// against is gone or was changed by an external writer while the dialog was open: the
+    /// stale operation is refused through the replay-conflict path instead of overwriting
+    /// the external work.
+    private struct StaleRemoteDialogEdit: Error {}
+
+    /// How `saveValidatedRemoteChange` concluded a dialog-driven remote change.
+    private enum RemoteDialogSaveOutcome {
+        case saved
+        /// The profile was changed outside the dialog; nothing was written.
+        case stale
+        /// The save itself failed; nothing was committed (display copy attached).
+        case failed(String)
+    }
+
+    /// The save path shared by the remote dialogs (conversion and Source URL/interval edits),
+    /// following the creation precedent: the change replays on the latest on-disk state and is
+    /// committed only when the save fully succeeds — fetched or re-enterable dialog input must
+    /// fail the dialog rather than linger as an unsaved in-memory edit (unlike applyEdit's
+    /// degraded mode, which exists so typed content is never lost). A successful save
+    /// schedules the follow-up merge like any other edit.
+    private func saveValidatedRemoteChange(
+        _ change: @escaping (inout ActivationModel) throws -> Void
+    ) -> RemoteDialogSaveOutcome {
+        guard model != nil else {
+            return .failed(String(localized: "The workspace is not loaded."))
+        }
+        // A pending merge's content is superseded by this change (applyEdit's rule).
+        followUpMergeTask?.cancel()
+        // The comparison derives from the model; recompute it on every exit path.
+        defer {
+            if hasHostsDrift {
+                refreshHostsDriftComparison()
+            }
+        }
+        do {
+            if saveError == nil {
+                switch try workspace.save(applying: change) {
+                case .saved(let saved):
+                    model = saved
+                case .conflict(let latest, _):
+                    model = latest
+                    return .stale
+                }
+            } else {
+                // Degraded mode (an earlier save failure keeps unsaved edits in memory): the
+                // replay target is the in-memory model, written whole, so those edits
+                // self-heal on this save — persistByReplaying's rule.
+                guard var updated = model else {
+                    return .failed(String(localized: "The workspace is not loaded."))
+                }
+                try change(&updated)
+                try workspace.save(updated)
+                model = updated
+                saveError = nil
+            }
+        } catch is StaleRemoteDialogEdit {
+            return .stale
+        } catch {
+            return .failed(String(localized: "Save failed: \(String(describing: error))"))
+        }
+        scheduleFollowUpMerge()
+        return .saved
+    }
+
+    /// A dialog fetch either yields validated content (with the response's cache validators
+    /// to store alongside it) or display copy for the refusal.
+    private enum DialogFetchOutcome {
+        case fetched(String, RemoteContentValidators?)
+        case refused(String)
+    }
+
+    /// The unconditional fetch for dialogs and creation: no validators are sent, so the
+    /// outcome always carries content (the fetcher refuses a 304 nobody asked for).
+    private func fetchContent(from url: URL) async throws -> (String, RemoteContentValidators?) {
+        guard case .content(let text, let validators) = try await fetchRemote(url, nil) else {
+            throw RemoteFetchError.httpStatus(304)
+        }
+        return (text, validators)
+    }
+
+    /// One validated dialog fetch, with cancellation reported as its own copy — re-checked
+    /// after a successful fetch, so a dialog cancelled mid-fetch never stores anything.
+    private func fetchContentForDialog(from url: URL) async -> DialogFetchOutcome {
+        let fetched: String
+        let validators: RemoteContentValidators?
+        do {
+            (fetched, validators) = try await fetchContent(from: url)
+        } catch {
+            if Task.isCancelled {
+                return .refused(String(localized: "The fetch was cancelled."))
+            }
+            return .refused(Self.remoteFetchFailureMessage(for: error))
+        }
+        guard !Task.isCancelled else {
+            return .refused(String(localized: "The fetch was cancelled."))
+        }
+        return .fetched(fetched, validators)
     }
 
     // MARK: - Managing groups (#22)
@@ -822,7 +1536,7 @@ final class WorkspaceStore {
                 model = updated
                 saveError = nil
             }
-            return .imported
+            return .imported(ImportSummary(of: contents))
         } catch {
             return .failed(Self.importFailureMessage(for: error))
         }

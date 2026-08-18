@@ -9,6 +9,15 @@ public protocol ConfirmedHostsWriteTracking: Sendable {
     func hostsWriteDidConfirm(_ targetHash: String) async
 }
 
+/// The daemon confirmed the write, but recording the confirmed baseline into the manifest
+/// failed: the system hosts IS updated — callers must not report the write itself as
+/// failed — while the persisted drift baseline is now behind, so the next status check by a
+/// process without the in-memory tracker may report drift until a later write records it.
+public struct ConfirmedWriteBaselineError: Error {
+    public let confirmedHash: String
+    public let underlying: any Error
+}
+
 /// App-side merge orchestration: asks the daemon to write to disk, and only records
 /// the daemon-confirmed content hash into the manifest after a successful confirmation
 /// (#18); any failure is rethrown as-is with the hash untouched, so the comparison
@@ -86,7 +95,13 @@ public actor MergeCoordinator {
                 throw error
             }
             await confirmedWriteTracker?.hostsWriteDidConfirm(confirmed)
-            try workspace.recordLastWrittenHash(confirmed)
+            do {
+                try workspace.recordLastWrittenHash(confirmed)
+            } catch {
+                // The write is a fact the daemon confirmed; a caller reporting this raw
+                // error would misdescribe the hosts as not updated.
+                throw ConfirmedWriteBaselineError(confirmedHash: confirmed, underlying: error)
+            }
             return confirmed
         }
         tail = Task { _ = try? await task.value }

@@ -76,10 +76,8 @@
 "Select for editing. Drag to move." = "选中以编辑。拖动以移动。";
 "Activate %@" = "将 %@ 设为生效";
 "Deactivate %@" = "取消 %@ 的生效";
-"Active" = "生效中";
+"Active" = "生效";
 "Inactive" = "未生效";
-"Saved Active" = "已选用（暂停中）";
-"Make Active" = "设为生效";
 "Delete Profile" = "删除方案";
 "Group: %@ · One profile active at a time" = "分组：%@ · 同一分组内同时只有一个方案生效";
 "Standalone profile · Toggles independently" = "独立方案 · 独立开关";
@@ -119,6 +117,11 @@
 "The current /etc/hosts content is unavailable." = "当前 /etc/hosts 内容不可用。";
 "Protected · Read Only" = "受保护 · 只读";
 "Always Active" = "始终生效";
+"Remote · Read Only" = "远程 · 只读";
+"Refreshes every hour" = "每小时刷新";
+"Refreshes every 6 hours" = "每 6 小时刷新";
+"Refreshes every 24 hours" = "每 24 小时刷新";
+"Manual refresh only" = "仅手动刷新";
 "Profile Name" = "方案名称";
 "Open Maintenance" = "打开维护面板";
 
@@ -170,6 +173,10 @@
 "the export contains a profile or group with an empty name" = "导出内容中存在名称为空的方案或分组";
 "this file is not UTF-8 text" = "此文件不是 UTF-8 文本";
 "Nothing was imported. %@: %@." = "未导入任何内容。%@：%@。";
+"Import Complete" = "导入完成";
+"Imported 1 profile." = "已导入 1 个方案。";
+"Imported %lld profiles." = "已导入 %lld 个方案。";
+"Remote profiles will fetch content from these URLs:" = "远程方案将从以下 URL 获取内容：";
 
 /* Helper maintenance */
 "Helper Ready" = "辅助程序就绪";
@@ -204,3 +211,58 @@
 /* Titlebar switch */
 "Resume hostflip" = "恢复 hostflip";
 "Pause hostflip" = "暂停 hostflip";
+
+/* Remote profile creation */
+"New Remote Profile…" = "新建远程方案…";
+"New Remote Profile" = "新建远程方案";
+"hostflip fetches hosts content from the Source URL and keeps the profile up to date. Remote content is read-only." = "hostflip 将从来源 URL 拉取 hosts 内容并保持方案更新。远程内容为只读。";
+"Source URL" = "来源 URL";
+"Name" = "名称";
+"Optional — the URL’s host" = "可选 — 默认使用 URL 的主机名";
+"Refresh" = "刷新";
+"Every Hour" = "每小时";
+"Every 6 Hours" = "每 6 小时";
+"Every 24 Hours" = "每 24 小时";
+"Manual Only" = "仅手动";
+"Fetching…" = "正在拉取…";
+"Cancel" = "取消";
+"Create" = "创建";
+"The workspace is not loaded." = "工作区尚未加载。";
+"The Source URL must be an HTTPS address." = "来源 URL 必须是 HTTPS 地址。";
+"The URL redirected to a non-HTTPS address." = "该 URL 重定向到了非 HTTPS 地址。";
+"The fetched content is larger than 10 MB." = "拉取到的内容超过 10 MB。";
+"The fetched content is not UTF-8 text." = "拉取到的内容不是 UTF-8 文本。";
+"The URL returned a web page, not hosts content." = "该 URL 返回的是网页，而不是 hosts 内容。";
+"The content could not be fetched: %@" = "无法拉取内容：%@";
+"The Source URL could not be reached: %@" = "无法访问来源 URL：%@";
+"The server responded with HTTP %lld." = "服务器返回了 HTTP %lld。";
+"The fetch was cancelled." = "拉取已取消。";
+
+/* Remote refresh */
+"Refresh Now" = "立即刷新";
+"Refresh All Remote Profiles" = "刷新所有远程方案";
+"Refreshing…" = "正在刷新…";
+"Refreshing %@" = "正在刷新 %@";
+"Last refresh failed." = "上次刷新失败。";
+"Last successful refresh: %@" = "上次成功刷新：%@";
+"No successful refresh yet." = "尚未成功刷新过。";
+"Refreshed %@" = "刷新于%@";
+"Refresh failed · content from %@" = "刷新失败 · 内容来自%@";
+"Refresh failed" = "刷新失败";
+"Not yet refreshed" = "尚未刷新";
+
+/* Remote conversion and editing */
+"Edit Source URL & Interval…" = "编辑来源 URL 与刷新间隔…";
+"Convert to Local…" = "转换为本地方案…";
+"Convert to Local Profile?" = "要转换为本地方案吗？";
+"Convert to Local" = "转换为本地方案";
+"The profile will stop fetching from %@. The current content stays as an editable local profile." = "此方案将不再从 %@ 拉取内容。当前内容将保留为可编辑的本地方案。";
+"Convert to Remote Profile?" = "要转换为远程方案吗？";
+"The edited first line is a Remote Header. Converting makes this a Remote Profile: its content is replaced by what the Source URL serves and becomes read-only. Keeping it local discards the edit." = "编辑后的第一行是 Remote Header。转换后它将成为远程方案：内容将替换为从来源 URL 拉取的内容，并变为只读。保留为本地方案则会放弃这次编辑。";
+"Keep as Local" = "保留为本地方案";
+"Convert" = "转换";
+"Edit Remote Profile" = "编辑远程方案";
+"Changing the Source URL fetches and validates the new address first; until that succeeds, the current Source URL and content stay." = "更改来源 URL 时会先拉取并校验新地址；在成功之前，当前来源 URL 与内容保持不变。";
+"Save" = "保存";
+"The profile was changed outside this dialog." = "方案已在此对话框之外被更改。";
+"The profile is no longer a remote profile." = "该方案已不再是远程方案。";

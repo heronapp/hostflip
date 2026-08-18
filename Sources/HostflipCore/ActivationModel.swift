@@ -1,3 +1,5 @@
+import Foundation
+
 public struct BaseHosts: Equatable, Sendable {
     public var content: String
 
@@ -18,11 +20,16 @@ public struct Profile: Identifiable, Equatable, Sendable {
     public let id: ID
     public var name: String
     public var content: String
+    /// Runtime refresh state when this is a Remote Profile (ADR-0012); nil until a refresh
+    /// outcome is recorded, and reset whenever the content's Source URL changes or the
+    /// Remote Header is removed (Convert to Local).
+    public var remoteRefreshState: RemoteRefreshState?
 
-    public init(id: ID, name: String, content: String) {
+    public init(id: ID, name: String, content: String, remoteRefreshState: RemoteRefreshState? = nil) {
         self.id = id
         self.name = name
         self.content = content
+        self.remoteRefreshState = remoteRefreshState
     }
 }
 
@@ -134,7 +141,52 @@ public struct ActivationModel: Sendable {
     }
 
     public mutating func updateProfileContent(_ profileID: Profile.ID, content: String) throws {
-        try mutateProfile(profileID) { $0.content = content }
+        try mutateProfile(profileID) { profile in
+            // The refresh state describes the fetch history of one Source URL: changing the
+            // URL or removing the Remote Header (Convert to Local) resets it, while body-only
+            // updates (Refresh) and interval edits keep it.
+            if RemoteHeader.parse(fromContent: content)?.sourceURL
+                != RemoteHeader.parse(fromContent: profile.content)?.sourceURL {
+                profile.remoteRefreshState = nil
+            }
+            profile.content = content
+        }
+    }
+
+    /// Looks up a profile anywhere in the model (the standalone area or any group).
+    public func profile(_ profileID: Profile.ID) -> Profile? {
+        allProfiles.first { $0.id == profileID }
+    }
+
+    /// Records a successful refresh of a Remote Profile: the state becomes "succeeded at
+    /// `date`" with the fetched content's validators, clearing any failure marker. Creation
+    /// and conversion record their validation fetch through here as the first success.
+    public mutating func recordRemoteRefreshSuccess(
+        _ profileID: Profile.ID,
+        at date: Date,
+        validators: RemoteContentValidators? = nil
+    ) throws {
+        // Floored to whole seconds: the manifest's ISO8601 encoding truncates fractional
+        // seconds, and refresh staleness baselines compare the in-memory date against its
+        // persisted round trip — a fractional date would never equal its reload, making
+        // every follow-up refresh look stale.
+        let floored = Date(timeIntervalSince1970: date.timeIntervalSince1970.rounded(.down))
+        try mutateProfile(profileID) {
+            $0.remoteRefreshState = RemoteRefreshState(
+                lastSuccessAt: floored,
+                lastAttemptFailed: false,
+                validators: validators
+            )
+        }
+    }
+
+    /// Records a failed refresh attempt, keeping the last success time for display.
+    public mutating func recordRemoteRefreshFailure(_ profileID: Profile.ID) throws {
+        try mutateProfile(profileID) {
+            var state = $0.remoteRefreshState ?? RemoteRefreshState()
+            state.lastAttemptFailed = true
+            $0.remoteRefreshState = state
+        }
     }
 
     public mutating func deleteProfile(_ profileID: Profile.ID) throws {

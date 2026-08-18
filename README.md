@@ -4,7 +4,7 @@ Native macOS hosts switcher. Flip between `/etc/hosts` profiles from your menu b
 
 **Free and open source (MIT).** From the makers of [Heron](https://getheron.app/) — debug your iPhone's web traffic and console, from your Mac.
 
-![hostflip main window: profile groups in the sidebar, the merged system hosts on the right](docs/screenshots/main-window.png)
+![hostflip main window: profile groups in the sidebar, a remote profile with its source and freshness on the right](docs/screenshots/main-window.png)
 
 ## Why hostflip
 
@@ -59,8 +59,14 @@ The bundle ships with a `hostflip` CLI ([Install](#install) covers how it gets o
     hostflip activate staging/api    # switch, by name or group/profile path
     hostflip cat staging/api         # print a profile's content as stored
     hostflip write staging/api --file ./hosts.snippet
+    hostflip refresh                 # re-fetch every remote profile (or name one)
+    hostflip doctor dev.example.com  # diagnose one hostname, layer by layer
 
 Profile names are not unique — IDs are; pass `--id` when a name is ambiguous. For scripting and agents, `--json` puts a result object on stdout and structured errors with stable string codes on stderr, and exit codes are meaningful — in particular `3` means the system hosts drifted and hostflip won't write until you reconcile in the app. `hostflip --help` lists the full command surface.
+
+`hostflip refresh` reports its two layers separately: fetched content is always saved to the workspace (conditional requests keep unchanged sources cheap), while the system hosts is only rewritten when an active profile actually changed — a write blocked by drift or an unavailable daemon exits `3`/`4` with the fresh content kept, and `--json` carries a per-profile result for every source.
+
+`hostflip doctor <hostname>` answers "why isn't my hosts entry working" in one pass: which profiles carry the name (and whether they're active), every mapping in the merged output, whether the system hosts file drifted, and what the system resolver actually returns — the resolver returns *all* matching entries, so the report compares sets instead of declaring a winner. When the system side is consistent, it tells you what to check next (browser DNS caches, connection pools, DNS-over-HTTPS). It's entirely read-only, works without the helper approved, and exits `7` when the diagnosis finds an inconsistency (`0` when everything agrees), so it drops straight into CI checks.
 
 ## FAQ
 
@@ -75,7 +81,7 @@ To pick up a switch without restarting the browser:
 - **Safari**: exposes neither; restart it or wait for idle connections to time out.
 - DevTools' "Disable cache" does not help — it only affects the HTTP cache, not DNS or connection reuse.
 
-To confirm the switch itself took effect, ask the system resolver directly: `dscacheutil -q host -a name your.host.name`. If that returns the new address, hostflip did its job and what you're seeing is browser-side.
+To confirm the switch itself took effect, ask the system resolver directly: `dscacheutil -q host -a name your.host.name` — or run `hostflip doctor your.host.name`, which performs this check and the whole chain (profiles → merge → file → resolver) in one command. If the system resolver returns the new address, hostflip did its job and what you're seeing is browser-side.
 
 One adjacent trap: with DNS-over-HTTPS enabled (Chrome's "Secure DNS", Firefox's TRR), some configurations bypass `/etc/hosts` entirely. That shows up as hosts entries *never* working — different from needing a browser restart.
 

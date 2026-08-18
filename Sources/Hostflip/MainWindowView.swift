@@ -188,6 +188,8 @@ struct MainWindowView: View {
     @State private var groupPendingRename: HostflipCore.Group.ID?
     @State private var groupNameDraft = ""
     @State private var groupPendingDeletion: HostflipCore.Group?
+    /// Presents the "New Remote Profile…" dialog, which owns the first-fetch validation flow.
+    @State private var isCreatingRemoteProfile = false
     /// Sidebar view state only, never part of the workspace model: groups the user
     /// folded up. Absence means expanded, so new groups start open.
     @State private var collapsedGroups: Set<HostflipCore.Group.ID> = []
@@ -347,6 +349,19 @@ struct MainWindowView: View {
                 }
             }
         }
+        .sheet(isPresented: $isCreatingRemoteProfile) {
+            NewRemoteProfileSheet(store: store) { profileID in
+                selection = .profile(profileID)
+            }
+        }
+        // Driven by the store, not view state: the held draft is what makes the dialog
+        // necessary, and dismissing it by any route must drop the draft (ADR-0012).
+        .sheet(isPresented: Binding(
+            get: { store.pendingRemoteConversion != nil },
+            set: { if !$0 { store.cancelRemoteConversion() } }
+        )) {
+            RemoteConversionSheet(store: store)
+        }
     }
 
     private var sidebar: some View {
@@ -476,6 +491,11 @@ struct MainWindowView: View {
                     }
                     .keyboardShortcut("n", modifiers: [.command])
                     Button {
+                        isCreatingRemoteProfile = true
+                    } label: {
+                        Label("New Remote Profile…", systemImage: "antenna.radiowaves.left.and.right")
+                    }
+                    Button {
                         createGroup()
                     } label: {
                         Label("New Group", systemImage: "folder.badge.plus")
@@ -526,6 +546,7 @@ struct MainWindowView: View {
             )
             .accessibilityLabel(profile.name)
             .accessibilityHint("Select for editing. Drag to move.")
+            remoteRefreshStatusMarker(profile)
             ZStack {
                 Menu {
                     profileActionButtons(profile, groupID: groupID, index: index)
@@ -757,12 +778,55 @@ struct MainWindowView: View {
         focusedGroupName = nil
     }
 
+    /// Passive remote refresh status in the sidebar row (#70): a spinner while a refresh is
+    /// in flight, and a warning marker when the most recent refresh failed — the failure copy
+    /// and the last success time ride along as its tooltip. No system notification.
+    @ViewBuilder
+    private func remoteRefreshStatusMarker(_ profile: Profile) -> some View {
+        // Both markers require the remote identity: a profile converted to local while its
+        // last refresh fetch is still in flight must not keep showing a spinner (the stale
+        // result is dropped by the store's replay guards when that fetch returns).
+        if profile.isRemote, store.refreshingProfileIDs.contains(profile.id) {
+            ProgressView()
+                .controlSize(.mini)
+                .help("Refreshing…")
+                .accessibilityLabel("Refreshing \(profile.name)")
+        } else if profile.isRemote, profile.remoteRefreshState?.lastAttemptFailed == true {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .help(remoteRefreshFailureDescription(profile))
+                .accessibilityLabel(remoteRefreshFailureDescription(profile))
+        }
+    }
+
+    private func remoteRefreshFailureDescription(_ profile: Profile) -> String {
+        let failure = store.remoteRefreshErrors[profile.id]
+            ?? String(localized: "Last refresh failed.")
+        let lastSuccess: String
+        if let succeededAt = profile.remoteRefreshState?.lastSuccessAt {
+            lastSuccess = String(
+                localized: "Last successful refresh: \(succeededAt.formatted(.relative(presentation: .named)))"
+            )
+        } else {
+            lastSuccess = String(localized: "No successful refresh yet.")
+        }
+        // Joined with a newline, not a space: zh/ja copy does not space between sentences.
+        return failure + "\n" + lastSuccess
+    }
+
     @ViewBuilder
     private func profileActionButtons(
         _ profile: Profile,
         groupID: HostflipCore.Group.ID?,
         index: Int
     ) -> some View {
+        if profile.isRemote {
+            Button("Refresh Now") {
+                Task { await store.refreshRemoteProfile(profile.id) }
+            }
+            .disabled(store.refreshingProfileIDs.contains(profile.id))
+            Divider()
+        }
         Button("Rename Profile…") {
             selection = .profile(profile.id)
             profilePendingNameFocus = profile.id
@@ -942,7 +1006,9 @@ struct MainWindowView: View {
         return HostsEditor(
             text: Binding(
                 get: {
-                    if let profileID { return store.profile(profileID)?.content ?? "" }
+                    // The held conversion draft, when one is up: the editor must keep showing
+                    // what was typed while the confirmation dialog decides its fate.
+                    if let profileID { return store.editedProfileContent(profileID) }
                     return store.baseHostsContent
                 },
                 set: { newValue in
@@ -950,7 +1016,9 @@ struct MainWindowView: View {
                     store.updateProfileContent(profileID, content: newValue)
                 }
             ),
-            isEditable: profileID != nil,
+            // Read-only for Base Hosts and for Remote Profiles alike: the former only changes
+            // through drift reconciliation, the latter only through Refresh (ADR-0012).
+            isEditable: profile?.isRemote == false,
             documentID: profileID.map { AnyHashable($0) } ?? AnyHashable("base-hosts")
         )
     }
@@ -1343,7 +1411,7 @@ private struct SystemHostsViewerPane: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text("System Hosts")
                         .font(.headline)
                     Text("/etc/hosts · Read Only")
@@ -1382,7 +1450,7 @@ private struct SystemHostsViewerPane: View {
 private struct BaseHostsHeader: View {
     var body: some View {
         HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text("Base Hosts")
                     .font(.headline)
                 Text("Protected · Read Only")
@@ -1393,9 +1461,6 @@ private struct BaseHostsHeader: View {
             Label("Always Active", systemImage: "lock.fill")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(.primary.opacity(0.06), in: Capsule())
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -1414,6 +1479,9 @@ private struct ProfileEditorHeader: View {
     let requestDeletion: () -> Void
     @State private var draftName: String
     @FocusState private var nameFieldFocused: Bool
+    @State private var nameFieldHovered = false
+    @State private var isEditingRemote = false
+    @State private var isConfirmingConvertToLocal = false
 
     init(
         store: WorkspaceStore,
@@ -1433,8 +1501,8 @@ private struct ProfileEditorHeader: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
                 TextField("Profile Name", text: $draftName)
                     .textFieldStyle(.plain)
                     .font(.headline)
@@ -1447,53 +1515,168 @@ private struct ProfileEditorHeader: View {
                         draftName = profile.name
                         nameFieldFocused = false
                     }
+                    .onHover { nameFieldHovered = $0 }
+                    .background {
+                        // The hover-revealed backdrop is the field's edit affordance: at rest
+                        // the name reads as plain text (#78).
+                        if nameFieldHovered || nameFieldFocused {
+                            RoundedRectangle(cornerRadius: 5)
+                                .fill(.quaternary.opacity(0.6))
+                                .padding(-3)
+                        }
+                    }
+                Spacer()
+                SaveErrorText(store: store)
+                if store.isSwitching {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+                activeToggle
+                actionsMenu
+            }
+            if let header = profile.remoteHeader {
+                remoteMetadataLine(header)
+            } else {
                 Text(locationDescription)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Spacer()
-            SaveErrorText(store: store)
-            if store.isSwitching {
-                ProgressView()
-                    .controlSize(.small)
-            }
-            activePill
-            Button {
-                requestDeletion()
-            } label: {
-                Image(systemName: "trash")
-            }
-            .buttonStyle(.borderless)
-            .disabled(store.isSwitching)
-            .help("Delete Profile")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .onAppear { focusNameIfRequested() }
         .onChange(of: focusName) { focusNameIfRequested() }
+        .sheet(isPresented: $isEditingRemote) {
+            RemoteProfileEditSheet(store: store, profile: profile)
+        }
+        .alert("Convert to Local Profile?", isPresented: $isConfirmingConvertToLocal) {
+            Button("Convert to Local") {
+                store.convertRemoteProfileToLocal(profile.id)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            if let header = profile.remoteHeader {
+                Text("The profile will stop fetching from \(header.sourceURL.absoluteString). The current content stays as an editable local profile.")
+            }
+        }
     }
 
-    private var activePill: some View {
-        let isSelectedActive = store.isActive(profile.id)
-        let isEffective = isSelectedActive && presentation.profilesAreEffective
-        return Button {
-            guard !presentation.activationControlsDisabled else { return }
-            store.setProfileActive(profile.id, !isSelectedActive)
+    private var actionsMenu: some View {
+        Menu {
+            if profile.isRemote {
+                Button("Refresh Now", action: refreshNow)
+                    .disabled(store.refreshingProfileIDs.contains(profile.id))
+                Button("Edit Source URL & Interval…") {
+                    isEditingRemote = true
+                }
+                Button("Convert to Local…") {
+                    isConfirmingConvertToLocal = true
+                }
+                Divider()
+            }
+            Button("Rename Profile…") {
+                nameFieldFocused = true
+            }
+            Divider()
+            Button("Delete Profile…", role: .destructive) {
+                requestDeletion()
+            }
+            .disabled(store.isSwitching)
         } label: {
-            Label(
-                isSelectedActive ? (isEffective ? "Active" : "Saved Active") : "Make Active",
-                systemImage: isSelectedActive ? "checkmark.circle.fill" : "circle"
-            )
-                .font(.caption)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(
-                    isEffective ? AnyShapeStyle(.green.opacity(0.2)) : AnyShapeStyle(.quaternary),
-                    in: Capsule()
-                )
+            Image(systemName: "ellipsis.circle")
         }
-        .buttonStyle(.plain)
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Profile Actions")
+    }
+
+    /// The native switch mirroring the titlebar master-switch idiom; it reflects the saved
+    /// active state — whether that state is currently effective is the master switch's story.
+    private var activeToggle: some View {
+        Toggle("Active", isOn: Binding(
+            get: { store.isActive(profile.id) },
+            set: { active in
+                guard !presentation.activationControlsDisabled else { return }
+                store.setProfileActive(profile.id, active)
+            }
+        ))
+        .toggleStyle(.switch)
+        .controlSize(.small)
+        .font(.caption)
         .disabled(presentation.activationControlsDimmed)
+    }
+
+    /// The single metadata line of a Remote Profile: nature, source, and Freshness (#77/#78).
+    /// The domain is the only elastic segment — it truncates first so the Freshness never
+    /// leaves the screen; the content's Remote Header line carries the full URL anyway.
+    private func remoteMetadataLine(_ header: RemoteHeader) -> some View {
+        let freshness = RemoteFreshness.evaluate(
+            state: profile.remoteRefreshState,
+            isRefreshing: store.refreshingProfileIDs.contains(profile.id)
+        )
+        let isFailed = if case .failed = freshness { true } else { false }
+        return HStack(spacing: 5) {
+            Image(systemName: "antenna.radiowaves.left.and.right")
+            Text("Remote · Read Only")
+            Text(verbatim: "·")
+            Text(verbatim: header.sourceURL.host() ?? header.sourceURL.absoluteString)
+                .truncationMode(.middle)
+                .layoutPriority(-1)
+                .help(header.sourceURL.absoluteString)
+            Text(verbatim: "·")
+            if freshness == .refreshing {
+                ProgressView()
+                    .controlSize(.mini)
+            } else {
+                Button(action: refreshNow) {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .help("Refresh Now")
+            }
+            TimelineView(.periodic(from: .now, by: 10)) { _ in
+                Text(freshnessText(freshness))
+            }
+            .foregroundStyle(isFailed ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+            .help(freshnessDetail(for: header))
+        }
+        .lineLimit(1)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+
+    private func freshnessText(_ freshness: RemoteFreshness) -> String {
+        switch freshness {
+        case .refreshing:
+            String(localized: "Refreshing…")
+        case .refreshed(let date):
+            String(localized: "Refreshed \(date.formatted(.relative(presentation: .named)))")
+        case .failed(.some(let lastSuccessAt)):
+            String(
+                localized: "Refresh failed · content from \(lastSuccessAt.formatted(.relative(presentation: .named)))"
+            )
+        case .failed(nil):
+            String(localized: "Refresh failed")
+        case .neverRefreshed:
+            String(localized: "Not yet refreshed")
+        }
+    }
+
+    /// The Freshness segment's tooltip: the configured cadence plus the absolute last-success
+    /// time the walking relative text hides. Joined with a newline, not a space: zh/ja copy
+    /// does not space between sentences.
+    private func freshnessDetail(for header: RemoteHeader) -> String {
+        let cadence = remoteRefreshDescription(for: header.interval)
+        guard let lastSuccessAt = profile.remoteRefreshState?.lastSuccessAt else {
+            return cadence + "\n" + String(localized: "No successful refresh yet.")
+        }
+        let absolute = lastSuccessAt.formatted(date: .abbreviated, time: .shortened)
+        return cadence + "\n" + String(localized: "Last successful refresh: \(absolute)")
+    }
+
+    private func refreshNow() {
+        Task { await store.refreshRemoteProfile(profile.id) }
     }
 
     private var locationDescription: String {
@@ -1515,6 +1698,309 @@ private struct ProfileEditorHeader: View {
             await Task.yield()
             nameFieldFocused = true
             nameFocusConsumed()
+        }
+    }
+}
+
+/// UI copy for a Remote Profile's refresh cadence; the wire values (1h/6h/24h/manual) stay
+/// visible in the content's header line in the editor.
+private func remoteRefreshDescription(for interval: RemoteHeader.RefreshInterval) -> String {
+    switch interval {
+    case .oneHour: String(localized: "Refreshes every hour")
+    case .sixHours: String(localized: "Refreshes every 6 hours")
+    case .twentyFourHours: String(localized: "Refreshes every 24 hours")
+    case .manual: String(localized: "Manual refresh only")
+    }
+}
+
+/// The typed Source URL once it satisfies the header predicate (HTTPS + host); the dialogs keep
+/// their submit buttons disabled until then, so the store's own guard is a backstop, not the
+/// primary gate.
+private func enteredSourceURL(_ text: String) -> URL? {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let url = URL(string: trimmed), RemoteHeader.isValidSourceURL(url) else { return nil }
+    return url
+}
+
+/// The refresh-cadence picker shared by the remote-profile dialogs; the tags are the header's
+/// wire values, so what the user picks is exactly what the header line will say.
+private struct RefreshIntervalPicker: View {
+    @Binding var interval: RemoteHeader.RefreshInterval
+
+    var body: some View {
+        Picker("Refresh", selection: $interval) {
+            Text("Every Hour").tag(RemoteHeader.RefreshInterval.oneHour)
+            Text("Every 6 Hours").tag(RemoteHeader.RefreshInterval.sixHours)
+            Text("Every 24 Hours").tag(RemoteHeader.RefreshInterval.twentyFourHours)
+            Text("Manual Only").tag(RemoteHeader.RefreshInterval.manual)
+        }
+    }
+}
+
+/// The "New Remote Profile…" dialog (ADR-0012): the first fetch and its validation gates run
+/// inside the dialog, and only fully validated content creates the profile — a failure keeps the
+/// dialog open for retry or cancel, leaving no empty-shell remote profile behind.
+private struct NewRemoteProfileSheet: View {
+    let store: WorkspaceStore
+    let onCreated: (Profile.ID) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var urlText = ""
+    @State private var name = ""
+    @State private var interval: RemoteHeader.RefreshInterval = .twentyFourHours
+    @State private var errorMessage: String?
+    @State private var isCreating = false
+    @State private var creationTask: Task<Void, Never>?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("New Remote Profile")
+                    .font(.title2.bold())
+                Text("hostflip fetches hosts content from the Source URL and keeps the profile up to date. Remote content is read-only.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Form {
+                TextField(
+                    "Source URL",
+                    text: $urlText,
+                    prompt: Text(verbatim: "https://example.com/hosts.txt")
+                )
+                .disableAutocorrection(true)
+                TextField("Name", text: $name, prompt: Text("Optional — the URL’s host"))
+                RefreshIntervalPicker(interval: $interval)
+            }
+            .onSubmit(create)
+
+            if let errorMessage {
+                Label(errorMessage, systemImage: "xmark.octagon.fill")
+                    .foregroundStyle(.red)
+                    .font(.callout)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack {
+                if isCreating {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Fetching…")
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                // Cancel stays enabled mid-fetch (ADR-0012: retry or cancel): it abandons the
+                // in-flight fetch, and the store re-checks cancellation before persisting, so a
+                // cancelled creation stores nothing.
+                Button("Cancel") {
+                    creationTask?.cancel()
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+                Button("Create") {
+                    create()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(enteredSourceURL(urlText) == nil || isCreating)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 460)
+    }
+
+    private func create() {
+        guard let url = enteredSourceURL(urlText), !isCreating else { return }
+        errorMessage = nil
+        isCreating = true
+        creationTask = Task {
+            let outcome = await store.createRemoteProfile(sourceURL: url, name: name, interval: interval)
+            isCreating = false
+            guard !Task.isCancelled else { return }
+            switch outcome {
+            case .created(let profileID):
+                onCreated(profileID)
+                dismiss()
+            case .failed(let message):
+                errorMessage = message
+            }
+        }
+    }
+}
+
+/// The local→remote confirmation (ADR-0012): a local profile edited so its first line reads as a
+/// Remote Header is held rather than flipped — this dialog validates the Source URL with a real
+/// fetch and converts only on success. Keep as Local and failure leave the stored content as it
+/// was; presentation is driven by the store's held draft, so any dismissal drops the draft.
+private struct RemoteConversionSheet: View {
+    let store: WorkspaceStore
+    @State private var errorMessage: String?
+    @State private var isConverting = false
+    @State private var conversionTask: Task<Void, Never>?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Convert to Remote Profile?")
+                    .font(.title2.bold())
+                Text("The edited first line is a Remote Header. Converting makes this a Remote Profile: its content is replaced by what the Source URL serves and becomes read-only. Keeping it local discards the edit.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let pending = store.pendingRemoteConversion {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(verbatim: pending.header.sourceURL.absoluteString)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                    Text(remoteRefreshDescription(for: pending.header.interval))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if let errorMessage {
+                Label(errorMessage, systemImage: "xmark.octagon.fill")
+                    .foregroundStyle(.red)
+                    .font(.callout)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack {
+                if isConverting {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Fetching…")
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                // Stays available mid-fetch: it abandons the in-flight fetch, and the store
+                // re-checks cancellation before persisting, so a cancelled conversion stores
+                // nothing.
+                Button("Keep as Local") {
+                    conversionTask?.cancel()
+                    store.cancelRemoteConversion()
+                }
+                .keyboardShortcut(.cancelAction)
+                Button("Convert") {
+                    convert()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(isConverting)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 460)
+    }
+
+    private func convert() {
+        guard !isConverting else { return }
+        errorMessage = nil
+        isConverting = true
+        conversionTask = Task {
+            let outcome = await store.confirmRemoteConversion()
+            isConverting = false
+            guard !Task.isCancelled else { return }
+            if case .failed(let message) = outcome {
+                errorMessage = message
+            }
+            // Success cleared the held draft, which dismisses this sheet.
+        }
+    }
+}
+
+/// The Source URL / interval editor of a Remote Profile (ADR-0012): a URL change re-validates
+/// like creation — the fetch runs inside the sheet and only success stores the new header and
+/// content — while an interval-only change applies without a fetch. Failure keeps the sheet open
+/// for retry or cancel; the old Source URL and content are untouched either way.
+private struct RemoteProfileEditSheet: View {
+    let store: WorkspaceStore
+    private let profileID: Profile.ID
+    @Environment(\.dismiss) private var dismiss
+    @State private var urlText: String
+    @State private var interval: RemoteHeader.RefreshInterval
+    @State private var errorMessage: String?
+    @State private var isSaving = false
+    @State private var saveTask: Task<Void, Never>?
+
+    init(store: WorkspaceStore, profile: Profile) {
+        self.store = store
+        self.profileID = profile.id
+        let header = profile.remoteHeader
+        _urlText = State(initialValue: header?.sourceURL.absoluteString ?? "")
+        _interval = State(initialValue: header?.interval ?? .twentyFourHours)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Edit Remote Profile")
+                    .font(.title2.bold())
+                Text("Changing the Source URL fetches and validates the new address first; until that succeeds, the current Source URL and content stay.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Form {
+                TextField(
+                    "Source URL",
+                    text: $urlText,
+                    prompt: Text(verbatim: "https://example.com/hosts.txt")
+                )
+                .disableAutocorrection(true)
+                RefreshIntervalPicker(interval: $interval)
+            }
+            .onSubmit(save)
+
+            if let errorMessage {
+                Label(errorMessage, systemImage: "xmark.octagon.fill")
+                    .foregroundStyle(.red)
+                    .font(.callout)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack {
+                if isSaving {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Fetching…")
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                // Cancel stays available mid-fetch: it abandons the in-flight fetch, and the
+                // store re-checks cancellation before persisting, so nothing is saved.
+                Button("Cancel") {
+                    saveTask?.cancel()
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+                Button("Save") {
+                    save()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(enteredSourceURL(urlText) == nil || isSaving)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 460)
+    }
+
+    private func save() {
+        guard let url = enteredSourceURL(urlText), !isSaving else { return }
+        errorMessage = nil
+        isSaving = true
+        saveTask = Task {
+            let outcome = await store.editRemoteProfile(profileID, sourceURL: url, interval: interval)
+            isSaving = false
+            guard !Task.isCancelled else { return }
+            switch outcome {
+            case .updated:
+                dismiss()
+            case .failed(let message):
+                errorMessage = message
+            }
         }
     }
 }

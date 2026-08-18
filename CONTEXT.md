@@ -20,6 +20,30 @@ _Avoid_: independent profile, ungrouped profile
 Where standalone profiles live; profiles can move between groups and the standalone area, and deleting a group releases its members back here.
 _Avoid_: ungrouped area, root directory
 
+**Remote Profile**:
+A profile whose Remote Header declares the Source URL its content is fetched from; shown read-only, and otherwise participates in groups, the standalone area, activation, and the merge exactly like any other profile.
+_Avoid_: subscription, remote hosts, URL profile
+
+**Remote Header**:
+The first line of a Remote Profile's content, declaring its Source URL and refresh interval; its presence alone is what makes a profile remote, and it travels with the content through Export and Import.
+_Avoid_: managed-config line, magic comment
+
+**Source URL**:
+The HTTPS address declared in a Remote Header, from which the Remote Profile's content is fetched.
+_Avoid_: link, feed, subscription address
+
+**Refresh**:
+The act of fetching a Remote Profile's content from its Source URL and updating the workspace copy; a successful refresh with changed content re-merges automatically when allowed, and a failed refresh keeps the last successful content.
+_Avoid_: sync, update, pull
+
+**Freshness**:
+How recently a Remote Profile's content was successfully refreshed; surfaced persistently for every Remote Profile — not only on failure — with a failed latest attempt reported alongside the last success rather than replacing it.
+_Avoid_: sync status, staleness, up-to-date state
+
+**Convert to Local**:
+The one-way act of removing a profile's Remote Header, keeping the last fetched content as an ordinary editable profile; the only way a Remote Profile stops being remote.
+_Avoid_: unlink, disconnect, unsubscribe
+
 **Base Hosts**:
 The protected baseline captured from the system hosts on first run; always applied, shown read-only, cannot be deleted, and only updated through the controlled drift-reconciliation flow.
 _Avoid_: system hosts (reserve that term for the real /etc/hosts file)

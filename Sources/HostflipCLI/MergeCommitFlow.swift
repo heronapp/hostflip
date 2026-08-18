@@ -43,11 +43,7 @@ enum MergeCommitFlow {
             try workspace.recordLastWrittenHash(merged.hash)
             try persist(change, to: workspace)
             postWorkspaceChanged(workspace)
-            throw CLIError(
-                code: "dns-flush-failed",
-                message: "the system hosts was updated and the change was saved, but the DNS cache flush failed: \(failure.message)",
-                exitCode: .failure
-            )
+            throw dnsFlushFailure(failure)
         }
         try persist(change, to: workspace)
         postWorkspaceChanged(workspace)
@@ -55,7 +51,9 @@ enum MergeCommitFlow {
 
     /// interrupted means launchd is relaunching the daemon on demand and a single retry
     /// recovers; both attempts reuse the mergeID (same discipline as SwitchCoordinator).
-    private static func mergeWithOneRetry(
+    /// Internal rather than private: refresh (#73) merges through this too, but commits its
+    /// content before the merge instead of after — a blocked write must not roll it back.
+    static func mergeWithOneRetry(
         _ merged: MergedHosts,
         via merger: any HostsMerging
     ) async throws -> String {
@@ -65,6 +63,16 @@ enum MergeCommitFlow {
         } catch let error as DaemonChannelError where error.isRetryable {
             return try await merger.merge(merged, mergeID: mergeID, isInterruptedRetry: true)
         }
+    }
+
+    /// The one flush-failure error, shared with refresh (#73) so the landed-write rule — the
+    /// change is a fact, record the hash, report only the flush — and its copy live in one place.
+    static func dnsFlushFailure(_ failure: HostsWriteError) -> CLIError {
+        CLIError(
+            code: "dns-flush-failed",
+            message: "the system hosts was updated and the change was saved, but the DNS cache flush failed: \(failure.message)",
+            exitCode: .failure
+        )
     }
 
     /// Commits the changed state by replaying it on the latest on-disk model (ADR-0010 ②). At

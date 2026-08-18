@@ -84,8 +84,89 @@ private final class SystemHostsDataSource: @unchecked Sendable {
     }
 }
 
+/// Mutable canned fetch results keyed by Source URL: tests flip the remote content between
+/// calls, and can attach a one-shot side effect that runs before a fetch returns (simulating
+/// concurrent writers racing an in-flight refresh).
+private final class RemoteContentStub: @unchecked Sendable {
+    private let lock = NSLock()
+    private var results: [URL: Result<String, any Error>] = [:]
+    private var beforeFetch: (@Sendable () throws -> Void)?
+
+    func set(_ url: URL, _ result: Result<String, any Error>) {
+        lock.withLock { results[url] = result }
+    }
+
+    func setBeforeFetch(_ effect: @escaping @Sendable () throws -> Void) {
+        lock.withLock { beforeFetch = effect }
+    }
+
+    func fetch(_ url: URL) throws -> String {
+        let (effect, result) = lock.withLock { (beforeFetch, results[url]) }
+        try effect?()
+        guard let result else { throw StubError() }
+        return try result.get()
+    }
+}
+
+/// Mutable canned conditional-fetch outcomes keyed by Source URL, recording the validators
+/// each fetch sent; @unchecked because access is locked.
+private final class RemoteOutcomeStub: @unchecked Sendable {
+    private let lock = NSLock()
+    private var results: [URL: Result<RemoteFetchOutcome, any Error>] = [:]
+    private var received: [RemoteContentValidators?] = []
+    private var beforeFetch: (@Sendable () throws -> Void)?
+
+    var sentValidators: [RemoteContentValidators?] {
+        lock.withLock { received }
+    }
+
+    func set(_ url: URL, _ result: Result<RemoteFetchOutcome, any Error>) {
+        lock.withLock { results[url] = result }
+    }
+
+    /// One-shot side effect run before the next fetch returns, simulating a concurrent
+    /// writer racing an in-flight refresh.
+    func setBeforeFetch(_ effect: @escaping @Sendable () throws -> Void) {
+        lock.withLock { beforeFetch = effect }
+    }
+
+    func fetch(_ url: URL, sending validators: RemoteContentValidators?) throws -> RemoteFetchOutcome {
+        let (effect, result) = lock.withLock { () -> (
+            (@Sendable () throws -> Void)?, Result<RemoteFetchOutcome, any Error>?
+        ) in
+            received.append(validators)
+            defer { beforeFetch = nil }
+            return (beforeFetch, results[url])
+        }
+        try effect?()
+        guard let result else { throw StubError() }
+        return try result.get()
+    }
+}
+
+/// Mutable date for tests that must observe a refresh advancing the success time;
+/// @unchecked because access is locked.
+private final class MutableClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var date: Date
+
+    init(_ date: Date) {
+        self.date = date
+    }
+
+    var now: Date {
+        lock.withLock { date }
+    }
+
+    func advance(by interval: TimeInterval) {
+        lock.withLock { date = date.addingTimeInterval(interval) }
+    }
+}
+
 final class WorkspaceStoreTests: XCTestCase {
     private static let importedHosts = "127.0.0.1 localhost\n"
+    /// The injected refresh clock: a whole second, matching the manifest's ISO8601 precision.
+    private static let refreshClock = Date(timeIntervalSince1970: 1_755_000_000)
     private var rootDirectory: URL!
 
     override func setUpWithError() throws {
@@ -1267,7 +1348,7 @@ final class WorkspaceStoreTests: XCTestCase {
 
         let outcome = store.importFiles(at: urls)
 
-        XCTAssertEqual(outcome, .imported)
+        XCTAssertEqual(outcome, .imported(ImportSummary(profileCount: 3, remoteSourceURLs: [])))
         XCTAssertEqual(store.standaloneProfiles.map(\.name), ["Ad Block", "Team DB"])
         XCTAssertEqual(store.groups.map(\.name), ["Staging"])
         XCTAssertEqual(store.groups.first?.profiles.map(\.name), ["API"])
@@ -1297,13 +1378,41 @@ final class WorkspaceStoreTests: XCTestCase {
             try writeImportFile(named: "dup.json", snapshot.encoded())
         ])
 
-        XCTAssertEqual(outcome, .imported)
+        XCTAssertEqual(outcome, .imported(ImportSummary(profileCount: 1, remoteSourceURLs: [])))
         XCTAssertEqual(store.standaloneProfiles.map(\.name), ["New Profile", "New Profile"])
         let reloaded = try reloadModel()
         XCTAssertEqual(reloaded.standaloneProfiles.map(\.name), ["New Profile", "New Profile"])
         XCTAssertEqual(reloaded.standaloneProfiles.map(\.content).sorted(), [
             "# Add hosts entries here\n", "0.0.0.0 ads.example\n",
         ])
+    }
+
+    @MainActor
+    func testImportRebuildsARemoteProfileInactiveAndSummarizesItsSourceURL() throws {
+        let stub = SwitchCoordinatingStub()
+        let store = makeStore(coordinator: stub)
+        let content = "#!hostflip-remote https://hosts.example/list.txt interval=6h\n0.0.0.0 tracker.example\n"
+        let url = try writeImportFile(named: "team.json", ExportSnapshot(
+            standaloneProfiles: [.init(name: "Blocklist", content: content)],
+            groups: []
+        ).encoded())
+
+        let outcome = store.importFiles(at: [url])
+
+        XCTAssertEqual(outcome, .imported(ImportSummary(
+            profileCount: 1,
+            remoteSourceURLs: ["https://hosts.example/list.txt"]
+        )))
+        let imported = try XCTUnwrap(store.standaloneProfiles.first)
+        XCTAssertTrue(imported.isRemote)
+        XCTAssertEqual(imported.remoteHeader?.interval, .sixHours)
+        XCTAssertEqual(store.model?.activeProfileIDs, [])
+        // Offline and purely local: nothing reaches the coordinator, no follow-up merge.
+        XCTAssertNil(store.followUpMergeTask)
+        XCTAssertTrue(stub.authorizedMerges.isEmpty)
+        XCTAssertTrue(stub.performedSwitches.isEmpty)
+        // The rebuilt remote identity survives the workspace save/reload.
+        XCTAssertTrue(try XCTUnwrap(reloadModel().standaloneProfiles.first).isRemote)
     }
 
     @MainActor
@@ -1485,7 +1594,7 @@ final class WorkspaceStoreTests: XCTestCase {
             try writeImportFile(named: "Team DB.hosts", Data("10.0.0.3 db.example\n".utf8))
         ])
 
-        XCTAssertEqual(outcome, .imported)
+        XCTAssertEqual(outcome, .imported(ImportSummary(profileCount: 1, remoteSourceURLs: [])))
         XCTAssertEqual(store.standaloneProfiles.map(\.name), ["CLI", "Team DB"])
         XCTAssertEqual(try reloadModel().standaloneProfiles.map(\.name), ["CLI", "Team DB"])
     }
@@ -1585,6 +1694,1344 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertEqual(store.standaloneProfiles.map(\.id), [profileID, .init("cli")])
     }
 
+    // MARK: - Creating remote profiles (ADR-0012)
+
+    @MainActor
+    func testCreateRemoteProfileFetchesValidatesAndPersistsInactive() async throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub(), fetchRemoteContent: { url in
+            XCTAssertEqual(url.absoluteString, "https://example.com/hosts.txt")
+            return "1.2.3.4 a.example.com\n"
+        })
+
+        let outcome = await store.createRemoteProfile(
+            sourceURL: URL(string: "https://example.com/hosts.txt")!,
+            name: "GitHub Accelerator",
+            interval: .sixHours
+        )
+
+        guard case .created(let profileID) = outcome else {
+            return XCTFail("expected creation, got \(outcome)")
+        }
+        let profile = try XCTUnwrap(store.profile(profileID))
+        XCTAssertEqual(profile.name, "GitHub Accelerator")
+        XCTAssertEqual(
+            profile.content,
+            "#!hostflip-remote https://example.com/hosts.txt interval=6h\n1.2.3.4 a.example.com\n"
+        )
+        XCTAssertFalse(store.isActive(profileID))
+
+        let reloaded = try reloadModel()
+        XCTAssertEqual(reloaded.standaloneProfiles.map(\.id), [profileID])
+        XCTAssertEqual(reloaded.activeProfileIDs, [])
+    }
+
+    @MainActor
+    func testCreateRemoteProfileFailureLeavesNothingBehind() async throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub(), fetchRemoteContent: { _ in
+            throw RemoteFetchError.httpStatus(404)
+        })
+
+        let outcome = await store.createRemoteProfile(
+            sourceURL: URL(string: "https://example.com/hosts.txt")!,
+            name: "",
+            interval: .twentyFourHours
+        )
+
+        XCTAssertEqual(outcome, .failed("The server responded with HTTP 404."))
+        XCTAssertEqual(store.standaloneProfiles, [])
+        XCTAssertEqual(try reloadModel().standaloneProfiles, [])
+    }
+
+    @MainActor
+    func testCreateRemoteProfileRejectsANonHTTPSURLBeforeFetching() async {
+        let store = makeStore(coordinator: SwitchCoordinatingStub(), fetchRemoteContent: { _ in
+            XCTFail("a rejected URL must never be fetched")
+            return ""
+        })
+
+        let outcome = await store.createRemoteProfile(
+            sourceURL: URL(string: "http://example.com/hosts.txt")!,
+            name: "",
+            interval: .twentyFourHours
+        )
+
+        XCTAssertEqual(outcome, .failed("The Source URL must be an HTTPS address."))
+        XCTAssertEqual(store.standaloneProfiles, [])
+    }
+
+    @MainActor
+    func testCreateRemoteProfileFailsWhenTheSaveFails() async throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub(), fetchRemoteContent: { _ in
+            "1.2.3.4 a.example.com\n"
+        })
+        // Sabotage persistence: without the first-capture backup the workspace refuses to save.
+        try FileManager.default.removeItem(at: rootDirectory.appendingPathComponent("hosts.orig"))
+
+        let outcome = await store.createRemoteProfile(
+            sourceURL: URL(string: "https://example.com/hosts.txt")!,
+            name: "",
+            interval: .twentyFourHours
+        )
+
+        guard case .failed(let message) = outcome else {
+            return XCTFail("expected a failure, got \(outcome)")
+        }
+        XCTAssertTrue(message.hasPrefix("Save failed:"), message)
+        XCTAssertEqual(store.standaloneProfiles, [], "a failed save must not leave an in-memory profile")
+    }
+
+    @MainActor
+    func testCreateRemoteProfileCancelledAfterTheFetchStoresNothing() async throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub(), fetchRemoteContent: { _ in
+            // Returns content only once the surrounding task is cancelled, pinning the
+            // cancellation between the successful fetch and persistence.
+            while !Task.isCancelled {
+                await Task.yield()
+            }
+            return "1.2.3.4 a.example.com\n"
+        })
+
+        let creation = Task {
+            await store.createRemoteProfile(
+                sourceURL: URL(string: "https://example.com/hosts.txt")!,
+                name: "",
+                interval: .twentyFourHours
+            )
+        }
+        creation.cancel()
+        let outcome = await creation.value
+
+        XCTAssertEqual(outcome, .failed("The fetch was cancelled."))
+        XCTAssertEqual(store.standaloneProfiles, [])
+        XCTAssertEqual(try reloadModel().standaloneProfiles, [])
+    }
+
+    @MainActor
+    func testCreateRemoteProfileEscapesAnEmbeddedHeaderInFetchedContent() async throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub(), fetchRemoteContent: { _ in
+            "#!hostflip-remote https://other.example.com/hosts.txt\n1.2.3.4 a.example.com\n"
+        })
+
+        let outcome = await store.createRemoteProfile(
+            sourceURL: URL(string: "https://example.com/hosts.txt")!,
+            name: "Nested",
+            interval: .manual
+        )
+
+        guard case .created(let profileID) = outcome else {
+            return XCTFail("expected creation, got \(outcome)")
+        }
+        let profile = try XCTUnwrap(store.profile(profileID))
+        XCTAssertEqual(profile.remoteHeader?.sourceURL.absoluteString, "https://example.com/hosts.txt")
+        XCTAssertTrue(profile.content.contains("# #!hostflip-remote https://other.example.com/hosts.txt"))
+    }
+
+    @MainActor
+    func testCreateRemoteProfileDefaultsTheNameToTheHost() async throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub(), fetchRemoteContent: { _ in
+            "1.2.3.4 a.example.com\n"
+        })
+
+        let first = await store.createRemoteProfile(
+            sourceURL: URL(string: "https://example.com/hosts.txt")!,
+            name: "  ",
+            interval: .twentyFourHours
+        )
+        let second = await store.createRemoteProfile(
+            sourceURL: URL(string: "https://example.com/other.txt")!,
+            name: "",
+            interval: .twentyFourHours
+        )
+
+        guard case .created = first, case .created = second else {
+            return XCTFail("expected two creations, got \(first) and \(second)")
+        }
+        XCTAssertEqual(store.standaloneProfiles.map(\.name), ["example.com", "example.com 2"])
+    }
+
+    /// The in-app end of the provenance guarantee: activating a created Remote Profile hands the
+    /// daemon a merge whose content carries the header line, so /etc/hosts shows the Source URL.
+    @MainActor
+    func testActivatingACreatedRemoteProfileMergesTheProvenanceLine() async throws {
+        let stub = SwitchCoordinatingStub()
+        let store = makeStore(coordinator: stub, fetchRemoteContent: { _ in
+            "140.82.112.4 github.com\n"
+        })
+        let outcome = await store.createRemoteProfile(
+            sourceURL: URL(string: "https://example.com/hosts.txt")!,
+            name: "GitHub520",
+            interval: .oneHour
+        )
+        guard case .created(let profileID) = outcome else {
+            return XCTFail("expected creation, got \(outcome)")
+        }
+
+        store.setProfileActive(profileID, true)
+        await store.switchTask?.value
+
+        XCTAssertTrue(store.isActive(profileID))
+        let merged = try XCTUnwrap(stub.performedSwitches.last)
+        XCTAssertTrue(merged.content.contains(
+            "#!hostflip-remote https://example.com/hosts.txt interval=1h"
+        ))
+        XCTAssertTrue(merged.content.contains("140.82.112.4 github.com"))
+    }
+
+    // MARK: - Refreshing remote profiles (#70)
+
+    @MainActor
+    func testCreateRemoteProfileRecordsTheValidationFetchAsTheFirstSuccess() async throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub(), fetchRemoteContent: { _ in
+            "1.2.3.4 a.example.com\n"
+        })
+
+        let profileID = try await createRemoteProfile(in: store)
+
+        let expected = RemoteRefreshState(lastSuccessAt: Self.refreshClock, lastAttemptFailed: false)
+        XCTAssertEqual(store.profile(profileID)?.remoteRefreshState, expected)
+        XCTAssertEqual(try reloadModel().profile(profileID)?.remoteRefreshState, expected)
+    }
+
+    @MainActor
+    func testRefreshUpdatesContentRecordsSuccessAndMergesThroughTheAuthorizedPath() async throws {
+        let stub = SwitchCoordinatingStub()
+        let content = RemoteContentStub()
+        let url = URL(string: "https://example.com/hosts.txt")!
+        content.set(url, .success("1.1.1.1 v1.example.com\n"))
+        let store = makeStore(coordinator: stub, fetchRemoteContent: { try content.fetch($0) })
+        let profileID = try await createRemoteProfile(in: store, url: url)
+        store.setProfileActive(profileID, true)
+        await store.switchTask?.value
+        await store.followUpMergeTask?.value
+        XCTAssertEqual(stub.performedSwitches.count, 1)
+
+        content.set(url, .success("2.2.2.2 v2.example.com\n"))
+        await store.refreshRemoteProfile(profileID)
+        await store.followUpMergeTask?.value
+
+        let profile = try XCTUnwrap(store.profile(profileID))
+        XCTAssertEqual(RemoteHeader.storedBody(of: profile.content), "2.2.2.2 v2.example.com\n")
+        XCTAssertEqual(
+            profile.remoteRefreshState,
+            RemoteRefreshState(lastSuccessAt: Self.refreshClock, lastAttemptFailed: false)
+        )
+        // The write went through mergeIfAuthorized only: no new switch, so registration and
+        // approval prompting can never trigger.
+        XCTAssertEqual(stub.performedSwitches.count, 1)
+        let merged = try XCTUnwrap(stub.authorizedMerges.last)
+        XCTAssertTrue(merged.content.contains("2.2.2.2 v2.example.com"))
+        XCTAssertEqual(
+            RemoteHeader.storedBody(of: try XCTUnwrap(reloadModel().profile(profileID)).content),
+            "2.2.2.2 v2.example.com\n"
+        )
+    }
+
+    @MainActor
+    func testRefreshFailureKeepsTheOldContentAndRecordsThePassiveFailure() async throws {
+        let stub = SwitchCoordinatingStub()
+        let content = RemoteContentStub()
+        let url = URL(string: "https://example.com/hosts.txt")!
+        content.set(url, .success("1.1.1.1 v1.example.com\n"))
+        let store = makeStore(coordinator: stub, fetchRemoteContent: { try content.fetch($0) })
+        let profileID = try await createRemoteProfile(in: store, url: url)
+        let contentBeforeRefresh = try XCTUnwrap(store.profile(profileID)).content
+
+        content.set(url, .failure(RemoteFetchError.httpStatus(500)))
+        await store.refreshRemoteProfile(profileID)
+
+        let profile = try XCTUnwrap(store.profile(profileID))
+        XCTAssertEqual(profile.content, contentBeforeRefresh)
+        XCTAssertEqual(
+            profile.remoteRefreshState,
+            RemoteRefreshState(lastSuccessAt: Self.refreshClock, lastAttemptFailed: true)
+        )
+        XCTAssertEqual(store.remoteRefreshErrors[profileID], "The server responded with HTTP 500.")
+        XCTAssertNil(store.followUpMergeTask)
+        XCTAssertEqual(stub.authorizedMerges, [])
+        XCTAssertEqual(stub.performedSwitches, [])
+        // The failed flag survives a relaunch; the detailed copy is in-memory only.
+        XCTAssertEqual(
+            try reloadModel().profile(profileID)?.remoteRefreshState,
+            RemoteRefreshState(lastSuccessAt: Self.refreshClock, lastAttemptFailed: true)
+        )
+    }
+
+    @MainActor
+    func testRefreshSendsTheStoredValidatorsAndStoresTheResponseValidators() async throws {
+        let outcomes = RemoteOutcomeStub()
+        let url = URL(string: "https://example.com/hosts.txt")!
+        let creationValidators = RemoteContentValidators(etag: "\"v1\"")
+        outcomes.set(url, .success(.content("1.1.1.1 v1.example.com\n", validators: creationValidators)))
+        let store = makeStore(
+            coordinator: SwitchCoordinatingStub(),
+            fetchRemote: { try outcomes.fetch($0, sending: $1) }
+        )
+        let profileID = try await createRemoteProfile(in: store, url: url)
+
+        let refreshValidators = RemoteContentValidators(
+            etag: "\"v2\"",
+            lastModified: "Mon, 17 Aug 2026 00:00:00 GMT"
+        )
+        outcomes.set(url, .success(.content("2.2.2.2 v2.example.com\n", validators: refreshValidators)))
+        await store.refreshRemoteProfile(profileID)
+
+        // The dialog's validation fetch is unconditional; the refresh echoes the validators
+        // the creation stored, and stores the response's validators for the next fetch.
+        XCTAssertEqual(outcomes.sentValidators, [nil, creationValidators])
+        let expected = RemoteRefreshState(
+            lastSuccessAt: Self.refreshClock,
+            lastAttemptFailed: false,
+            validators: refreshValidators
+        )
+        XCTAssertEqual(store.profile(profileID)?.remoteRefreshState, expected)
+        XCTAssertEqual(try reloadModel().profile(profileID)?.remoteRefreshState, expected)
+    }
+
+    @MainActor
+    func testA304AnswerKeepsTheContentAndOnlyAdvancesTheSuccessTime() async throws {
+        let stub = SwitchCoordinatingStub()
+        let outcomes = RemoteOutcomeStub()
+        let clock = MutableClock(Self.refreshClock)
+        let url = URL(string: "https://example.com/hosts.txt")!
+        let validators = RemoteContentValidators(etag: "\"v1\"")
+        outcomes.set(url, .success(.content("1.1.1.1 v1.example.com\n", validators: validators)))
+        let store = WorkspaceStore(
+            workspace: Workspace(rootDirectory: rootDirectory),
+            coordinator: stub,
+            readSystemHosts: { Data(Self.importedHosts.utf8) },
+            fetchRemote: { try outcomes.fetch($0, sending: $1) },
+            now: { clock.now }
+        )
+        store.loadIfNeeded()
+        let profileID = try await createRemoteProfile(in: store, url: url)
+        // A failure in between proves the 304 clears the marker like a full success would.
+        outcomes.set(url, .failure(RemoteFetchError.httpStatus(500)))
+        await store.refreshRemoteProfile(profileID)
+        XCTAssertNotNil(store.remoteRefreshErrors[profileID])
+        let contentBeforeRefresh = try XCTUnwrap(store.profile(profileID)).content
+
+        clock.advance(by: 600)
+        outcomes.set(url, .success(.notModified(validators: nil)))
+        await store.refreshRemoteProfile(profileID)
+
+        let profile = try XCTUnwrap(store.profile(profileID))
+        XCTAssertEqual(profile.content, contentBeforeRefresh)
+        let expected = RemoteRefreshState(
+            lastSuccessAt: Self.refreshClock.addingTimeInterval(600),
+            lastAttemptFailed: false,
+            validators: validators
+        )
+        XCTAssertEqual(profile.remoteRefreshState, expected)
+        XCTAssertNil(store.remoteRefreshErrors[profileID])
+        // Nothing was downloaded and nothing changed, so nothing merges.
+        XCTAssertNil(store.followUpMergeTask)
+        XCTAssertEqual(stub.authorizedMerges, [])
+        XCTAssertEqual(try reloadModel().profile(profileID)?.remoteRefreshState, expected)
+
+        // A later 304 carrying refreshed validators replaces the stored ones.
+        clock.advance(by: 600)
+        let refreshed = RemoteContentValidators(etag: "\"v1-refreshed\"")
+        outcomes.set(url, .success(.notModified(validators: refreshed)))
+        await store.refreshRemoteProfile(profileID)
+
+        XCTAssertEqual(store.profile(profileID)?.content, contentBeforeRefresh)
+        XCTAssertEqual(
+            store.profile(profileID)?.remoteRefreshState,
+            RemoteRefreshState(
+                lastSuccessAt: Self.refreshClock.addingTimeInterval(1200),
+                lastAttemptFailed: false,
+                validators: refreshed
+            )
+        )
+    }
+
+    @MainActor
+    func testARefreshOvertakenByAConcurrentWriterIsDropped() async throws {
+        let stub = SwitchCoordinatingStub()
+        let outcomes = RemoteOutcomeStub()
+        let url = URL(string: "https://example.com/hosts.txt")!
+        outcomes.set(url, .success(.content("1.1.1.1 v1.example.com\n", validators: nil)))
+        let store = makeStore(coordinator: stub, fetchRemote: { try outcomes.fetch($0, sending: $1) })
+        let profileID = try await createRemoteProfile(in: store, url: url)
+        let header = try XCTUnwrap(store.profile(profileID)?.remoteHeader)
+        // While this refresh's fetch is in flight, a foreign writer (the CLI) refreshes the
+        // same URL and saves newer content; the possibly older response landing afterwards
+        // must not overwrite it — the moved success-time baseline marks it stale.
+        let root: URL = rootDirectory
+        let foreignSuccessAt = Self.refreshClock.addingTimeInterval(300)
+        let foreignContent = header.storedContent(forFetched: "2.2.2.2 v2.example.com\n")
+        outcomes.setBeforeFetch {
+            let workspace = Workspace(rootDirectory: root)
+            var model = try workspace.openReadOnly()
+            try model.updateProfileContent(profileID, content: foreignContent)
+            try model.recordRemoteRefreshSuccess(profileID, at: foreignSuccessAt)
+            try workspace.save(model)
+        }
+        outcomes.set(url, .success(.content("1.1.1.1 v1-stale.example.com\n", validators: nil)))
+
+        await store.refreshRemoteProfile(profileID)
+
+        let profile = try XCTUnwrap(store.profile(profileID))
+        XCTAssertEqual(RemoteHeader.storedBody(of: profile.content), "2.2.2.2 v2.example.com\n")
+        XCTAssertEqual(
+            profile.remoteRefreshState,
+            RemoteRefreshState(lastSuccessAt: foreignSuccessAt, lastAttemptFailed: false)
+        )
+        XCTAssertNil(store.remoteRefreshErrors[profileID])
+        XCTAssertEqual(
+            RemoteHeader.storedBody(of: try XCTUnwrap(reloadModel().profile(profileID)).content),
+            "2.2.2.2 v2.example.com\n"
+        )
+    }
+
+    @MainActor
+    func testRefreshesWithAFractionalSecondClockKeepApplying() async throws {
+        // The production clock is Date() with fractional seconds, unlike the whole-second
+        // refreshClock every other test injects. The recorded date must survive the
+        // manifest's whole-second ISO8601 round trip, or the in-memory baseline never
+        // matches the replayed disk state and every refresh after the first drops as stale
+        // (found on a verification machine, 2026-08-18).
+        let url = URL(string: "https://example.com/hosts.txt")!
+        let outcomes = RemoteOutcomeStub()
+        outcomes.set(url, .success(.content("1.1.1.1 v1.example.com\n", validators: nil)))
+        let store = WorkspaceStore(
+            workspace: Workspace(rootDirectory: rootDirectory),
+            coordinator: SwitchCoordinatingStub(),
+            readSystemHosts: { Data(Self.importedHosts.utf8) },
+            fetchRemote: { try outcomes.fetch($0, sending: $1) },
+            now: { Date(timeIntervalSince1970: 1_755_505_332.734) }
+        )
+        store.loadIfNeeded()
+        let profileID = try await createRemoteProfile(in: store, url: url)
+
+        outcomes.set(url, .success(.content("2.2.2.2 v2.example.com\n", validators: nil)))
+        await store.refreshRemoteProfile(profileID)
+        XCTAssertEqual(
+            RemoteHeader.storedBody(of: try XCTUnwrap(store.profile(profileID)).content),
+            "2.2.2.2 v2.example.com\n"
+        )
+
+        outcomes.set(url, .success(.content("3.3.3.3 v3.example.com\n", validators: nil)))
+        await store.refreshRemoteProfile(profileID)
+        XCTAssertEqual(
+            RemoteHeader.storedBody(of: try XCTUnwrap(store.profile(profileID)).content),
+            "3.3.3.3 v3.example.com\n"
+        )
+    }
+
+    @MainActor
+    func testASameSecondConcurrentRefreshIsStillDetectedAsStale() async throws {
+        // The manifest stores whole seconds and the injected clock is fixed, so the foreign
+        // refresh's success time equals this refresh's baseline: the stored body is what
+        // marks the older in-flight response stale.
+        let outcomes = RemoteOutcomeStub()
+        let url = URL(string: "https://example.com/hosts.txt")!
+        outcomes.set(url, .success(.content("1.1.1.1 v1.example.com\n", validators: nil)))
+        let store = makeStore(
+            coordinator: SwitchCoordinatingStub(),
+            fetchRemote: { try outcomes.fetch($0, sending: $1) }
+        )
+        let profileID = try await createRemoteProfile(in: store, url: url)
+        let header = try XCTUnwrap(store.profile(profileID)?.remoteHeader)
+        let root: URL = rootDirectory
+        let foreignContent = header.storedContent(forFetched: "3.3.3.3 newer.example.com\n")
+        let sameSecond = Self.refreshClock
+        outcomes.setBeforeFetch {
+            let workspace = Workspace(rootDirectory: root)
+            var model = try workspace.openReadOnly()
+            try model.updateProfileContent(profileID, content: foreignContent)
+            try model.recordRemoteRefreshSuccess(profileID, at: sameSecond)
+            try workspace.save(model)
+        }
+        outcomes.set(url, .success(.content("2.2.2.2 stale.example.com\n", validators: nil)))
+
+        await store.refreshRemoteProfile(profileID)
+
+        XCTAssertEqual(
+            RemoteHeader.storedBody(of: try XCTUnwrap(store.profile(profileID)).content),
+            "3.3.3.3 newer.example.com\n"
+        )
+        XCTAssertEqual(
+            RemoteHeader.storedBody(of: try XCTUnwrap(reloadModel().profile(profileID)).content),
+            "3.3.3.3 newer.example.com\n"
+        )
+    }
+
+    @MainActor
+    func testA304ResendingOneValidatorKeepsTheOtherStoredField() async throws {
+        let outcomes = RemoteOutcomeStub()
+        let url = URL(string: "https://example.com/hosts.txt")!
+        outcomes.set(url, .success(.content(
+            "1.1.1.1 v1.example.com\n",
+            validators: RemoteContentValidators(
+                etag: "\"v1\"",
+                lastModified: "Mon, 17 Aug 2026 00:00:00 GMT"
+            )
+        )))
+        let store = makeStore(
+            coordinator: SwitchCoordinatingStub(),
+            fetchRemote: { try outcomes.fetch($0, sending: $1) }
+        )
+        let profileID = try await createRemoteProfile(in: store, url: url)
+
+        // RFC 7232 lets the 304 resend any subset: the resent field replaces the stored
+        // one, the omitted field must keep its stored value.
+        outcomes.set(url, .success(.notModified(
+            validators: RemoteContentValidators(etag: "\"v1-refreshed\"")
+        )))
+        await store.refreshRemoteProfile(profileID)
+
+        XCTAssertEqual(
+            store.profile(profileID)?.remoteRefreshState?.validators,
+            RemoteContentValidators(
+                etag: "\"v1-refreshed\"",
+                lastModified: "Mon, 17 Aug 2026 00:00:00 GMT"
+            )
+        )
+    }
+
+    @MainActor
+    func testRemoteScheduleEntriesDeriveFromTheHeadersAndRefreshState() async throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub(), fetchRemoteContent: { _ in
+            "1.1.1.1 v1.example.com\n"
+        })
+        store.createStandaloneProfile()
+        let url = URL(string: "https://example.com/hosts.txt")!
+        let outcome = await store.createRemoteProfile(sourceURL: url, name: "Remote", interval: .oneHour)
+        guard case .created(let profileID) = outcome else {
+            return XCTFail("expected creation, got \(outcome)")
+        }
+
+        XCTAssertEqual(
+            store.remoteScheduleEntries,
+            [RemoteRefreshSchedule.Entry(
+                profileID: profileID,
+                interval: .oneHour,
+                lastSuccessAt: Self.refreshClock
+            )]
+        )
+
+        // Every started refresh — manual and scheduled alike — records its attempt time,
+        // which the entries surface so the scheduler can space retries.
+        await store.refreshRemoteProfile(profileID)
+        XCTAssertEqual(store.remoteScheduleEntries.first?.lastAttemptAt, Self.refreshClock)
+    }
+
+    @MainActor
+    func testModelChangesPokeTheRemoteScheduleHook() {
+        let store = makeStore(coordinator: SwitchCoordinatingStub())
+        var pokes = 0
+        store.remoteScheduleChanged = { pokes += 1 }
+
+        store.createStandaloneProfile()
+
+        XCTAssertGreaterThan(pokes, 0)
+    }
+
+    @MainActor
+    func testRefreshWithUnchangedContentDoesNotTouchTheSystemHosts() async throws {
+        let stub = SwitchCoordinatingStub()
+        let content = RemoteContentStub()
+        let url = URL(string: "https://example.com/hosts.txt")!
+        content.set(url, .success("1.1.1.1 v1.example.com\n"))
+        let store = makeStore(coordinator: stub, fetchRemoteContent: { try content.fetch($0) })
+        let profileID = try await createRemoteProfile(in: store, url: url)
+        store.setProfileActive(profileID, true)
+        await store.switchTask?.value
+        await store.followUpMergeTask?.value
+        // A failure in between proves the unchanged refresh still records a fresh success.
+        content.set(url, .failure(RemoteFetchError.httpStatus(500)))
+        await store.refreshRemoteProfile(profileID)
+        let mergeCount = stub.authorizedMerges.count
+        let contentBeforeRefresh = try XCTUnwrap(store.profile(profileID)).content
+
+        content.set(url, .success("1.1.1.1 v1.example.com\n"))
+        await store.refreshRemoteProfile(profileID)
+
+        let profile = try XCTUnwrap(store.profile(profileID))
+        XCTAssertEqual(profile.content, contentBeforeRefresh)
+        XCTAssertEqual(
+            profile.remoteRefreshState,
+            RemoteRefreshState(lastSuccessAt: Self.refreshClock, lastAttemptFailed: false)
+        )
+        XCTAssertNil(store.remoteRefreshErrors[profileID])
+        XCTAssertEqual(stub.authorizedMerges.count, mergeCount)
+    }
+
+    @MainActor
+    func testRefreshingAnInactiveProfileOnlyUpdatesTheWorkspace() async throws {
+        let stub = SwitchCoordinatingStub()
+        let content = RemoteContentStub()
+        let url = URL(string: "https://example.com/hosts.txt")!
+        content.set(url, .success("1.1.1.1 v1.example.com\n"))
+        let store = makeStore(coordinator: stub, fetchRemoteContent: { try content.fetch($0) })
+        let profileID = try await createRemoteProfile(in: store, url: url)
+
+        content.set(url, .success("2.2.2.2 v2.example.com\n"))
+        await store.refreshRemoteProfile(profileID)
+
+        XCTAssertEqual(
+            RemoteHeader.storedBody(of: try XCTUnwrap(store.profile(profileID)).content),
+            "2.2.2.2 v2.example.com\n"
+        )
+        XCTAssertNil(store.followUpMergeTask)
+        XCTAssertEqual(stub.authorizedMerges, [])
+        XCTAssertEqual(stub.performedSwitches, [])
+        XCTAssertEqual(
+            RemoteHeader.storedBody(of: try XCTUnwrap(reloadModel().profile(profileID)).content),
+            "2.2.2.2 v2.example.com\n"
+        )
+    }
+
+    @MainActor
+    func testRefreshingWhilePausedOnlyUpdatesTheWorkspace() async throws {
+        let stub = SwitchCoordinatingStub()
+        let content = RemoteContentStub()
+        let url = URL(string: "https://example.com/hosts.txt")!
+        content.set(url, .success("1.1.1.1 v1.example.com\n"))
+        let store = makeStore(coordinator: stub, fetchRemoteContent: { try content.fetch($0) })
+        let profileID = try await createRemoteProfile(in: store, url: url)
+        store.setProfileActive(profileID, true)
+        await store.switchTask?.value
+        store.setPaused(true)
+        await store.switchTask?.value
+        await store.followUpMergeTask?.value
+        let mergeCount = stub.authorizedMerges.count
+
+        content.set(url, .success("2.2.2.2 v2.example.com\n"))
+        await store.refreshRemoteProfile(profileID)
+
+        XCTAssertEqual(
+            RemoteHeader.storedBody(of: try XCTUnwrap(store.profile(profileID)).content),
+            "2.2.2.2 v2.example.com\n"
+        )
+        XCTAssertEqual(stub.authorizedMerges.count, mergeCount)
+    }
+
+    @MainActor
+    func testRefreshingUnderDriftUpdatesTheWorkspaceAndTheDaemonGateRejectsTheWrite() async throws {
+        let stub = SwitchCoordinatingStub()
+        let driftMonitor = HostsDriftMonitoringStub()
+        let content = RemoteContentStub()
+        let url = URL(string: "https://example.com/hosts.txt")!
+        content.set(url, .success("1.1.1.1 v1.example.com\n"))
+        let store = makeStore(
+            coordinator: stub,
+            driftMonitor: driftMonitor,
+            fetchRemoteContent: { try content.fetch($0) }
+        )
+        let profileID = try await createRemoteProfile(in: store, url: url)
+        store.setProfileActive(profileID, true)
+        await store.switchTask?.value
+        await store.followUpMergeTask?.value
+        driftMonitor.report(true)
+        XCTAssertTrue(store.hasHostsDrift)
+        stub.authorizedMergeOutcome = .success(
+            .channelFailed(
+                .mergeRejected(.hostsDrift(expected: "expected", actual: "actual")),
+                statusAfterError: .enabled
+            )
+        )
+        let mergeCount = stub.authorizedMerges.count
+
+        content.set(url, .success("2.2.2.2 v2.example.com\n"))
+        await store.refreshRemoteProfile(profileID)
+        await store.followUpMergeTask?.value
+
+        // The workspace holds the refreshed content; the daemon's drift gate rejected the
+        // write, so the system hosts stays untouched until reconciliation carries it over.
+        XCTAssertEqual(
+            RemoteHeader.storedBody(of: try XCTUnwrap(store.profile(profileID)).content),
+            "2.2.2.2 v2.example.com\n"
+        )
+        XCTAssertEqual(stub.authorizedMerges.count, mergeCount + 1)
+        XCTAssertEqual(stub.performedSwitches.count, 1)
+        XCTAssertNotNil(store.backgroundSyncError)
+        XCTAssertEqual(
+            RemoteHeader.storedBody(of: try XCTUnwrap(reloadModel().profile(profileID)).content),
+            "2.2.2.2 v2.example.com\n"
+        )
+    }
+
+    @MainActor
+    func testRefreshAllRefreshesEveryRemoteProfileAndSkipsLocalOnes() async throws {
+        let stub = SwitchCoordinatingStub()
+        let content = RemoteContentStub()
+        let firstURL = URL(string: "https://example.com/hosts.txt")!
+        let secondURL = URL(string: "https://other.example.com/hosts.txt")!
+        content.set(firstURL, .success("1.1.1.1 v1.example.com\n"))
+        content.set(secondURL, .success("1.1.1.1 v1.other.example.com\n"))
+        let store = makeStore(coordinator: stub, fetchRemoteContent: { try content.fetch($0) })
+        let firstID = try await createRemoteProfile(in: store, url: firstURL)
+        let secondID = try await createRemoteProfile(in: store, url: secondURL, name: "Other")
+        let localID = try XCTUnwrap(store.createStandaloneProfile())
+        let localContent = try XCTUnwrap(store.profile(localID)).content
+
+        content.set(firstURL, .success("2.2.2.2 v2.example.com\n"))
+        content.set(secondURL, .success("2.2.2.2 v2.other.example.com\n"))
+        await store.refreshAllRemoteProfiles()
+
+        XCTAssertEqual(
+            RemoteHeader.storedBody(of: try XCTUnwrap(store.profile(firstID)).content),
+            "2.2.2.2 v2.example.com\n"
+        )
+        XCTAssertEqual(
+            RemoteHeader.storedBody(of: try XCTUnwrap(store.profile(secondID)).content),
+            "2.2.2.2 v2.other.example.com\n"
+        )
+        XCTAssertEqual(store.profile(localID)?.content, localContent)
+    }
+
+    @MainActor
+    func testARefreshResultForAReplacedSourceURLIsDropped() async throws {
+        let stub = SwitchCoordinatingStub()
+        let content = RemoteContentStub()
+        let url = URL(string: "https://example.com/hosts.txt")!
+        content.set(url, .success("1.1.1.1 v1.example.com\n"))
+        let store = makeStore(coordinator: stub, fetchRemoteContent: { try content.fetch($0) })
+        let profileID = try await createRemoteProfile(in: store, url: url)
+        // While the fetch is in flight, a foreign writer retargets the profile to another
+        // Source URL; the fetched result belongs to the old URL and must be dropped.
+        let foreignContent = RemoteHeader(sourceURL: URL(string: "https://other.example.com/hosts.txt")!)!
+            .storedContent(forFetched: "9.9.9.9 foreign.example.com\n")
+        let root: URL = rootDirectory
+        content.setBeforeFetch {
+            let workspace = Workspace(rootDirectory: root)
+            var model = try workspace.openReadOnly()
+            try model.updateProfileContent(profileID, content: foreignContent)
+            try workspace.save(model)
+        }
+        content.set(url, .success("2.2.2.2 stale.example.com\n"))
+
+        await store.refreshRemoteProfile(profileID)
+
+        XCTAssertEqual(store.profile(profileID)?.content, foreignContent)
+        XCTAssertNil(store.followUpMergeTask)
+        XCTAssertEqual(stub.authorizedMerges, [])
+        XCTAssertEqual(try reloadModel().profile(profileID)?.content, foreignContent)
+    }
+
+    @MainActor
+    func testARefreshFailureForAReplacedSourceURLIsDropped() async throws {
+        let stub = SwitchCoordinatingStub()
+        let content = RemoteContentStub()
+        let url = URL(string: "https://example.com/hosts.txt")!
+        content.set(url, .success("1.1.1.1 v1.example.com\n"))
+        let store = makeStore(coordinator: stub, fetchRemoteContent: { try content.fetch($0) })
+        let profileID = try await createRemoteProfile(in: store, url: url)
+        // The profile is retargeted while the failing fetch is in flight: the old URL's
+        // failure must not mark the new subscription as failed.
+        let foreignContent = RemoteHeader(sourceURL: URL(string: "https://other.example.com/hosts.txt")!)!
+            .storedContent(forFetched: "9.9.9.9 foreign.example.com\n")
+        let root: URL = rootDirectory
+        content.setBeforeFetch {
+            let workspace = Workspace(rootDirectory: root)
+            var model = try workspace.openReadOnly()
+            try model.updateProfileContent(profileID, content: foreignContent)
+            try workspace.save(model)
+        }
+        content.set(url, .failure(RemoteFetchError.httpStatus(500)))
+
+        await store.refreshRemoteProfile(profileID)
+
+        XCTAssertEqual(store.profile(profileID)?.content, foreignContent)
+        XCTAssertNil(store.profile(profileID)?.remoteRefreshState)
+        XCTAssertNil(store.remoteRefreshErrors[profileID])
+        XCTAssertNil(try reloadModel().profile(profileID)?.remoteRefreshState)
+    }
+
+    @MainActor
+    func testARefreshSaveFailureCancelsThePendingFollowUpMerge() async throws {
+        let stub = SwitchCoordinatingStub()
+        let content = RemoteContentStub()
+        let url = URL(string: "https://example.com/hosts.txt")!
+        content.set(url, .success("1.1.1.1 v1.example.com\n"))
+        let store = makeStore(coordinator: stub, fetchRemoteContent: { try content.fetch($0) })
+        let profileID = try await createRemoteProfile(in: store, url: url)
+        // An ordinary edit leaves a debounced follow-up merge pending…
+        store.createStandaloneProfile()
+        XCTAssertNotNil(store.followUpMergeTask)
+        // …then persistence breaks and a refresh comes back with new content. The refreshed
+        // content lives only in memory now, so the pending merge must not fire with it.
+        try FileManager.default.removeItem(at: rootDirectory.appendingPathComponent("hosts.orig"))
+        content.set(url, .success("2.2.2.2 v2.example.com\n"))
+
+        await store.refreshRemoteProfile(profileID)
+        await store.followUpMergeTask?.value
+
+        XCTAssertNotNil(store.saveError)
+        XCTAssertEqual(stub.authorizedMerges, [])
+        XCTAssertEqual(stub.performedSwitches, [])
+    }
+
+    @MainActor
+    func testARefreshFailureRecomputesTheDriftComparisonAfterAbsorbingExternalChanges() async throws {
+        let stub = SwitchCoordinatingStub()
+        let driftMonitor = HostsDriftMonitoringStub()
+        let content = RemoteContentStub()
+        let url = URL(string: "https://example.com/hosts.txt")!
+        content.set(url, .success("1.1.1.1 v1.example.com\n"))
+        let store = makeStore(
+            coordinator: stub,
+            driftMonitor: driftMonitor,
+            fetchRemoteContent: { try content.fetch($0) }
+        )
+        let localID = try XCTUnwrap(store.createStandaloneProfile())
+        store.setProfileActive(localID, true)
+        await store.switchTask?.value
+        await store.followUpMergeTask?.value
+        let remoteID = try await createRemoteProfile(in: store, url: url)
+        driftMonitor.report(true)
+        let comparisonBefore = try XCTUnwrap(store.hostsDriftComparison)
+        // A foreign writer changes the active profile's content on disk; the failure replay
+        // absorbs it, so the reviewed diff must be recomputed against the new model.
+        let root: URL = rootDirectory
+        content.setBeforeFetch {
+            let workspace = Workspace(rootDirectory: root)
+            var model = try workspace.openReadOnly()
+            try model.updateProfileContent(localID, content: "5.5.5.5 foreign.example.com\n")
+            try workspace.save(model)
+        }
+        content.set(url, .failure(RemoteFetchError.httpStatus(500)))
+
+        await store.refreshRemoteProfile(remoteID)
+
+        XCTAssertEqual(store.profile(localID)?.content, "5.5.5.5 foreign.example.com\n")
+        XCTAssertNotEqual(store.hostsDriftComparison, comparisonBefore)
+    }
+
+    @MainActor
+    func testRefreshingALocalProfileDoesNothing() async throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub())
+        let profileID = try XCTUnwrap(store.createStandaloneProfile())
+        await store.followUpMergeTask?.value
+        let contentBefore = try XCTUnwrap(store.profile(profileID)).content
+
+        await store.refreshRemoteProfile(profileID)
+
+        XCTAssertEqual(store.profile(profileID)?.content, contentBefore)
+        XCTAssertNil(store.profile(profileID)?.remoteRefreshState)
+        XCTAssertNil(store.remoteRefreshErrors[profileID])
+    }
+
+    // MARK: - Converting between local and remote (ADR-0012)
+
+    @MainActor
+    func testEditingALocalProfileToARemoteHeaderIsHeldForConfirmation() throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub())
+        let profileID = try XCTUnwrap(store.createStandaloneProfile())
+        let original = try XCTUnwrap(store.profile(profileID)).content
+        let draft = "#!hostflip-remote https://example.com/hosts.txt interval=6h\n"
+
+        store.updateProfileContent(profileID, content: draft)
+
+        // The stored content is untouched until the conversion is confirmed and validated.
+        XCTAssertEqual(store.profile(profileID)?.content, original)
+        XCTAssertEqual(try reloadModel().profile(profileID)?.content, original)
+        let pending = try XCTUnwrap(store.pendingRemoteConversion)
+        XCTAssertEqual(pending.profileID, profileID)
+        XCTAssertEqual(pending.header.sourceURL.absoluteString, "https://example.com/hosts.txt")
+        // The editor keeps showing the held draft while the confirmation is up.
+        XCTAssertEqual(store.editedProfileContent(profileID), draft)
+    }
+
+    @MainActor
+    func testBreakingTheHeldHeaderDraftAppliesTheEditAsAPlainLocalEdit() throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub())
+        let profileID = try XCTUnwrap(store.createStandaloneProfile())
+        store.updateProfileContent(profileID, content: "#!hostflip-remote https://example.com/x\n")
+
+        // The next keystroke breaks the would-be header; the flip is off the table.
+        store.updateProfileContent(profileID, content: "# #!hostflip-remote https://example.com/x\n")
+
+        XCTAssertNil(store.pendingRemoteConversion)
+        let profile = try XCTUnwrap(store.profile(profileID))
+        XCTAssertEqual(profile.content, "# #!hostflip-remote https://example.com/x\n")
+        XCTAssertFalse(profile.isRemote)
+    }
+
+    @MainActor
+    func testCancellingTheConversionKeepsTheContentAsItWas() throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub())
+        let profileID = try XCTUnwrap(store.createStandaloneProfile())
+        let original = try XCTUnwrap(store.profile(profileID)).content
+        store.updateProfileContent(profileID, content: "#!hostflip-remote https://example.com/x\n")
+
+        store.cancelRemoteConversion()
+
+        XCTAssertNil(store.pendingRemoteConversion)
+        XCTAssertEqual(store.profile(profileID)?.content, original)
+        XCTAssertEqual(store.editedProfileContent(profileID), original)
+        XCTAssertFalse(try XCTUnwrap(store.profile(profileID)).isRemote)
+    }
+
+    @MainActor
+    func testConfirmingTheConversionFetchesValidatesAndConverts() async throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub(), fetchRemoteContent: { _ in
+            "9.9.9.9 fetched.example.com\n"
+        })
+        let profileID = try XCTUnwrap(store.createStandaloneProfile())
+        store.updateProfileContent(
+            profileID,
+            content: "#!hostflip-remote https://example.com/hosts.txt interval=6h\n# typed\n"
+        )
+
+        let outcome = await store.confirmRemoteConversion()
+
+        XCTAssertEqual(outcome, .converted)
+        XCTAssertNil(store.pendingRemoteConversion)
+        let profile = try XCTUnwrap(store.profile(profileID))
+        XCTAssertTrue(profile.isRemote)
+        // Converting stores like creation: the validated fetch becomes the body — the
+        // draft below the typed header was the request to go remote, not content to keep.
+        XCTAssertEqual(
+            profile.content,
+            "#!hostflip-remote https://example.com/hosts.txt interval=6h\n9.9.9.9 fetched.example.com\n"
+        )
+        // The validation fetch is the first successful refresh (ADR-0012).
+        XCTAssertEqual(
+            profile.remoteRefreshState,
+            RemoteRefreshState(lastSuccessAt: Self.refreshClock, lastAttemptFailed: false)
+        )
+        XCTAssertEqual(try reloadModel().profile(profileID)?.content, profile.content)
+    }
+
+    @MainActor
+    func testAFailedConversionFetchKeepsTheContentAndTheDraftForRetry() async throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub(), fetchRemoteContent: { _ in
+            throw RemoteFetchError.httpStatus(404)
+        })
+        let profileID = try XCTUnwrap(store.createStandaloneProfile())
+        let original = try XCTUnwrap(store.profile(profileID)).content
+        store.updateProfileContent(profileID, content: "#!hostflip-remote https://example.com/x\n")
+
+        let outcome = await store.confirmRemoteConversion()
+
+        XCTAssertEqual(outcome, .failed("The server responded with HTTP 404."))
+        let profile = try XCTUnwrap(store.profile(profileID))
+        XCTAssertEqual(profile.content, original)
+        XCTAssertFalse(profile.isRemote)
+        // The draft stays held: the dialog offers retry or cancel, like the creation dialog.
+        XCTAssertNotNil(store.pendingRemoteConversion)
+    }
+
+    @MainActor
+    func testConvertingAnActiveProfileMergesTheHeaderLineThroughTheAuthorizedPath() async throws {
+        let stub = SwitchCoordinatingStub()
+        let store = makeStore(coordinator: stub, fetchRemoteContent: { _ in
+            "1.2.3.4 a.example.com\n"
+        })
+        let profileID = try XCTUnwrap(store.createStandaloneProfile())
+        store.setProfileActive(profileID, true)
+        await store.switchTask?.value
+        let switchCount = stub.performedSwitches.count
+        store.updateProfileContent(
+            profileID, content: "#!hostflip-remote https://example.com/x interval=1h\n"
+        )
+
+        let outcome = await store.confirmRemoteConversion()
+        await store.followUpMergeTask?.value
+
+        XCTAssertEqual(outcome, .converted)
+        // The conversion is an edit, not a switch: no registration or approval can trigger.
+        XCTAssertEqual(stub.performedSwitches.count, switchCount)
+        let merged = try XCTUnwrap(stub.authorizedMerges.last)
+        XCTAssertTrue(merged.content.contains("#!hostflip-remote https://example.com/x interval=1h"))
+        XCTAssertTrue(merged.content.contains("1.2.3.4 a.example.com"))
+    }
+
+    @MainActor
+    func testConvertToLocalStripsTheHeaderKeepsTheContentAndClearsTheRefreshState() async throws {
+        let stub = SwitchCoordinatingStub()
+        let content = RemoteContentStub()
+        let url = URL(string: "https://example.com/hosts.txt")!
+        content.set(url, .success("1.1.1.1 v1.example.com\n"))
+        let store = makeStore(coordinator: stub, fetchRemoteContent: { try content.fetch($0) })
+        let profileID = try await createRemoteProfile(in: store, url: url)
+        // A stale failure marker and its copy must not survive Convert to Local.
+        content.set(url, .failure(RemoteFetchError.httpStatus(500)))
+        await store.refreshRemoteProfile(profileID)
+        XCTAssertNotNil(store.remoteRefreshErrors[profileID])
+
+        store.convertRemoteProfileToLocal(profileID)
+
+        let profile = try XCTUnwrap(store.profile(profileID))
+        XCTAssertFalse(profile.isRemote)
+        XCTAssertEqual(profile.content, "1.1.1.1 v1.example.com\n")
+        XCTAssertNil(profile.remoteRefreshState)
+        XCTAssertNil(store.remoteRefreshErrors[profileID])
+        let reloaded = try XCTUnwrap(reloadModel().profile(profileID))
+        XCTAssertEqual(reloaded.content, "1.1.1.1 v1.example.com\n")
+        XCTAssertNil(reloaded.remoteRefreshState)
+    }
+
+    @MainActor
+    func testConvertToLocalKeepsGroupingAndActiveStateAndDropsTheProvenanceLine() async throws {
+        let stub = SwitchCoordinatingStub()
+        let store = makeStore(coordinator: stub, fetchRemoteContent: { _ in
+            "2.2.2.2 b.example.com\n"
+        })
+        let groupID = try XCTUnwrap(store.createGroup())
+        let profileID = try await createRemoteProfile(in: store)
+        store.moveProfile(profileID, toGroup: groupID, at: 0)
+        store.setProfileActive(profileID, true)
+        await store.switchTask?.value
+
+        store.convertRemoteProfileToLocal(profileID)
+        await store.followUpMergeTask?.value
+
+        XCTAssertTrue(store.isActive(profileID))
+        XCTAssertEqual(store.group(containing: profileID)?.id, groupID)
+        // The merged output loses the provenance line along with the Remote Header.
+        let merged = try XCTUnwrap(stub.authorizedMerges.last)
+        XCTAssertFalse(merged.content.contains("#!hostflip-remote"))
+        XCTAssertTrue(merged.content.contains("2.2.2.2 b.example.com"))
+    }
+
+    @MainActor
+    func testConvertToLocalKeepsAnEscapedEmbeddedHeaderEscaped() async throws {
+        let embedded = "#!hostflip-remote https://other.example.com/x interval=1h\n3.3.3.3 c.example.com\n"
+        let store = makeStore(coordinator: SwitchCoordinatingStub(), fetchRemoteContent: { _ in
+            embedded
+        })
+        let profileID = try await createRemoteProfile(in: store)
+
+        store.convertRemoteProfileToLocal(profileID)
+
+        // Q17③ regression: stripping the header must not expose the escaped embedded token —
+        // the escape stays, so the profile stays local instead of flipping straight back.
+        let profile = try XCTUnwrap(store.profile(profileID))
+        XCTAssertFalse(profile.isRemote)
+        XCTAssertEqual(profile.content, "# " + embedded)
+        XCTAssertNil(store.pendingRemoteConversion)
+    }
+
+    @MainActor
+    func testEditingTheIntervalOnlyRewritesTheHeaderWithoutFetching() async throws {
+        let content = RemoteContentStub()
+        let url = URL(string: "https://example.com/hosts.txt")!
+        content.set(url, .success("1.1.1.1 v1.example.com\n"))
+        let store = makeStore(coordinator: SwitchCoordinatingStub(), fetchRemoteContent: {
+            try content.fetch($0)
+        })
+        let profileID = try await createRemoteProfile(in: store, url: url)
+        // Any fetch from here on would fail the edit, proving the interval change never fetches.
+        content.set(url, .failure(RemoteFetchError.httpStatus(500)))
+
+        let outcome = await store.editRemoteProfile(profileID, sourceURL: url, interval: .sixHours)
+
+        XCTAssertEqual(outcome, .updated)
+        let profile = try XCTUnwrap(store.profile(profileID))
+        XCTAssertEqual(
+            profile.content,
+            "#!hostflip-remote https://example.com/hosts.txt interval=6h\n1.1.1.1 v1.example.com\n"
+        )
+        // An interval edit keeps the same Source URL: the refresh state survives.
+        XCTAssertEqual(
+            profile.remoteRefreshState,
+            RemoteRefreshState(lastSuccessAt: Self.refreshClock, lastAttemptFailed: false)
+        )
+        XCTAssertEqual(try reloadModel().profile(profileID)?.content, profile.content)
+    }
+
+    @MainActor
+    func testEditingTheSourceURLFetchesTheNewURLAndResetsTheState() async throws {
+        let content = RemoteContentStub()
+        let oldURL = URL(string: "https://example.com/hosts.txt")!
+        let newURL = URL(string: "https://mirror.example.net/hosts.txt")!
+        content.set(oldURL, .success("1.1.1.1 old.example.com\n"))
+        content.set(newURL, .success("2.2.2.2 new.example.com\n"))
+        let store = makeStore(coordinator: SwitchCoordinatingStub(), fetchRemoteContent: {
+            try content.fetch($0)
+        })
+        let profileID = try await createRemoteProfile(in: store, url: oldURL)
+        // A failure marker on the old Source URL must not follow the new one.
+        content.set(oldURL, .failure(RemoteFetchError.httpStatus(500)))
+        await store.refreshRemoteProfile(profileID)
+        XCTAssertNotNil(store.remoteRefreshErrors[profileID])
+
+        let outcome = await store.editRemoteProfile(profileID, sourceURL: newURL, interval: .oneHour)
+
+        XCTAssertEqual(outcome, .updated)
+        let profile = try XCTUnwrap(store.profile(profileID))
+        XCTAssertEqual(
+            profile.content,
+            "#!hostflip-remote https://mirror.example.net/hosts.txt interval=1h\n2.2.2.2 new.example.com\n"
+        )
+        // The edit's validation fetch is the new Source URL's first success (ADR-0012).
+        XCTAssertEqual(
+            profile.remoteRefreshState,
+            RemoteRefreshState(lastSuccessAt: Self.refreshClock, lastAttemptFailed: false)
+        )
+        XCTAssertNil(store.remoteRefreshErrors[profileID])
+        XCTAssertEqual(try reloadModel().profile(profileID)?.content, profile.content)
+    }
+
+    @MainActor
+    func testEditingTheSourceURLOfAnActiveProfileMergesTheNewSourceContent() async throws {
+        let stub = SwitchCoordinatingStub()
+        let content = RemoteContentStub()
+        let oldURL = URL(string: "https://example.com/hosts.txt")!
+        let newURL = URL(string: "https://mirror.example.net/hosts.txt")!
+        content.set(oldURL, .success("1.1.1.1 old.example.com\n"))
+        content.set(newURL, .success("2.2.2.2 new.example.com\n"))
+        let store = makeStore(coordinator: stub, fetchRemoteContent: { try content.fetch($0) })
+        let profileID = try await createRemoteProfile(in: store, url: oldURL)
+        store.setProfileActive(profileID, true)
+        await store.switchTask?.value
+        await store.followUpMergeTask?.value
+
+        let outcome = await store.editRemoteProfile(profileID, sourceURL: newURL, interval: .oneHour)
+        await store.followUpMergeTask?.value
+
+        XCTAssertEqual(outcome, .updated)
+        let merged = try XCTUnwrap(stub.authorizedMerges.last)
+        XCTAssertTrue(merged.content.contains(
+            "#!hostflip-remote https://mirror.example.net/hosts.txt interval=1h"
+        ))
+        XCTAssertTrue(merged.content.contains("2.2.2.2 new.example.com"))
+        XCTAssertFalse(merged.content.contains("https://example.com/hosts.txt"))
+    }
+
+    @MainActor
+    func testAFailedSourceURLEditKeepsTheOldSourceContentUntouched() async throws {
+        let content = RemoteContentStub()
+        let oldURL = URL(string: "https://example.com/hosts.txt")!
+        let newURL = URL(string: "https://mirror.example.net/hosts.txt")!
+        content.set(oldURL, .success("1.1.1.1 old.example.com\n"))
+        content.set(newURL, .failure(RemoteFetchError.looksLikeHTML))
+        let store = makeStore(coordinator: SwitchCoordinatingStub(), fetchRemoteContent: {
+            try content.fetch($0)
+        })
+        let profileID = try await createRemoteProfile(in: store, url: oldURL)
+        let contentBefore = try XCTUnwrap(store.profile(profileID)).content
+
+        let outcome = await store.editRemoteProfile(profileID, sourceURL: newURL, interval: .oneHour)
+
+        XCTAssertEqual(outcome, .failed("The URL returned a web page, not hosts content."))
+        let profile = try XCTUnwrap(store.profile(profileID))
+        XCTAssertEqual(profile.content, contentBefore)
+        XCTAssertEqual(
+            profile.remoteRefreshState,
+            RemoteRefreshState(lastSuccessAt: Self.refreshClock, lastAttemptFailed: false)
+        )
+        XCTAssertEqual(try reloadModel().profile(profileID)?.content, contentBefore)
+    }
+
+    @MainActor
+    func testACancelledConversionFetchStoresNothing() async throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub(), fetchRemoteContent: { _ in
+            // Parks until the surrounding task is cancelled, like an in-flight network fetch.
+            try await Task.sleep(for: .seconds(30))
+            return "9.9.9.9 fetched.example.com\n"
+        })
+        let profileID = try XCTUnwrap(store.createStandaloneProfile())
+        let original = try XCTUnwrap(store.profile(profileID)).content
+        store.updateProfileContent(profileID, content: "#!hostflip-remote https://example.com/x\n")
+
+        let conversion = Task { await store.confirmRemoteConversion() }
+        conversion.cancel()
+        let outcome = await conversion.value
+
+        XCTAssertEqual(outcome, .failed("The fetch was cancelled."))
+        let profile = try XCTUnwrap(store.profile(profileID))
+        XCTAssertEqual(profile.content, original)
+        XCTAssertFalse(profile.isRemote)
+        XCTAssertEqual(try reloadModel().profile(profileID)?.content, original)
+    }
+
+    @MainActor
+    func testACancelledSourceURLEditStoresNothing() async throws {
+        let content = RemoteContentStub()
+        let oldURL = URL(string: "https://example.com/hosts.txt")!
+        content.set(oldURL, .success("1.1.1.1 old.example.com\n"))
+        let store = makeStore(coordinator: SwitchCoordinatingStub(), fetchRemoteContent: { url in
+            if url == oldURL { return try content.fetch(url) }
+            // The edited URL's fetch parks until the surrounding task is cancelled.
+            try await Task.sleep(for: .seconds(30))
+            return "2.2.2.2 new.example.com\n"
+        })
+        let profileID = try await createRemoteProfile(in: store, url: oldURL)
+        let contentBefore = try XCTUnwrap(store.profile(profileID)).content
+
+        let edit = Task {
+            await store.editRemoteProfile(
+                profileID,
+                sourceURL: URL(string: "https://mirror.example.net/hosts.txt")!,
+                interval: .oneHour
+            )
+        }
+        edit.cancel()
+        let outcome = await edit.value
+
+        XCTAssertEqual(outcome, .failed("The fetch was cancelled."))
+        let profile = try XCTUnwrap(store.profile(profileID))
+        XCTAssertEqual(profile.content, contentBefore)
+        XCTAssertEqual(try reloadModel().profile(profileID)?.content, contentBefore)
+    }
+
+    @MainActor
+    func testConfirmingAgainstAnExternallyEditedProfileRefusesAndKeepsTheirContent() async throws {
+        let content = RemoteContentStub()
+        let url = URL(string: "https://example.com/hosts.txt")!
+        content.set(url, .success("9.9.9.9 fetched.example.com\n"))
+        let store = makeStore(coordinator: SwitchCoordinatingStub(), fetchRemoteContent: {
+            try content.fetch($0)
+        })
+        let profileID = try XCTUnwrap(store.createStandaloneProfile())
+        store.updateProfileContent(profileID, content: "#!hostflip-remote https://example.com/hosts.txt\n")
+        // While the validation fetch is in flight, a foreign writer saves its own local edit;
+        // the confirmed conversion is stale and must not overwrite it.
+        let root: URL = rootDirectory
+        content.setBeforeFetch {
+            let workspace = Workspace(rootDirectory: root)
+            var model = try workspace.openReadOnly()
+            try model.updateProfileContent(profileID, content: "5.5.5.5 foreign.example.com\n")
+            try workspace.save(model)
+        }
+
+        let outcome = await store.confirmRemoteConversion()
+
+        XCTAssertEqual(outcome, .failed("The profile was changed outside this dialog."))
+        XCTAssertEqual(store.profile(profileID)?.content, "5.5.5.5 foreign.example.com\n")
+        XCTAssertEqual(try reloadModel().profile(profileID)?.content, "5.5.5.5 foreign.example.com\n")
+        // The draft stays held so the dialog can show the copy; Keep as Local drops it.
+        XCTAssertNotNil(store.pendingRemoteConversion)
+    }
+
+    @MainActor
+    func testAConversionSaveFailureStoresNothing() async throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub(), fetchRemoteContent: { _ in
+            "9.9.9.9 fetched.example.com\n"
+        })
+        let profileID = try XCTUnwrap(store.createStandaloneProfile())
+        let original = try XCTUnwrap(store.profile(profileID)).content
+        store.updateProfileContent(profileID, content: "#!hostflip-remote https://example.com/x\n")
+        try FileManager.default.removeItem(at: rootDirectory.appendingPathComponent("hosts.orig"))
+
+        let outcome = await store.confirmRemoteConversion()
+
+        // The creation precedent: fetched content is re-fetchable, so a disk failure fails
+        // the dialog whole instead of leaving a converted profile only in memory.
+        guard case .failed(let message) = outcome else {
+            return XCTFail("expected a save failure, got \(outcome)")
+        }
+        XCTAssertTrue(message.hasPrefix("Save failed:"))
+        let profile = try XCTUnwrap(store.profile(profileID))
+        XCTAssertEqual(profile.content, original)
+        XCTAssertFalse(profile.isRemote)
+        XCTAssertNotNil(store.pendingRemoteConversion)
+    }
+
+    @MainActor
+    func testConvertToLocalKeepsAForeignlyRefreshedBody() async throws {
+        let content = RemoteContentStub()
+        let url = URL(string: "https://example.com/hosts.txt")!
+        content.set(url, .success("1.1.1.1 v1.example.com\n"))
+        let store = makeStore(coordinator: SwitchCoordinatingStub(), fetchRemoteContent: {
+            try content.fetch($0)
+        })
+        let profileID = try await createRemoteProfile(in: store, url: url)
+        // A foreign writer (e.g. the CLI) refreshed the content; the GUI model is stale. The
+        // conversion must keep the genuinely last fetched content, not the stale snapshot.
+        let freshContent = RemoteHeader(sourceURL: url, interval: .manual)!
+            .storedContent(forFetched: "7.7.7.7 fresh.example.com\n")
+        foreignlyModifyWorkspace { try $0.updateProfileContent(profileID, content: freshContent) }
+
+        store.convertRemoteProfileToLocal(profileID)
+
+        XCTAssertEqual(store.profile(profileID)?.content, "7.7.7.7 fresh.example.com\n")
+        XCTAssertEqual(try reloadModel().profile(profileID)?.content, "7.7.7.7 fresh.example.com\n")
+    }
+
+    @MainActor
+    func testAnIntervalEditRewritesTheHeaderAboveTheLatestSavedBody() async throws {
+        let content = RemoteContentStub()
+        let url = URL(string: "https://example.com/hosts.txt")!
+        content.set(url, .success("1.1.1.1 v1.example.com\n"))
+        let store = makeStore(coordinator: SwitchCoordinatingStub(), fetchRemoteContent: {
+            try content.fetch($0)
+        })
+        let profileID = try await createRemoteProfile(in: store, url: url)
+        // The body under the rewritten header must be the latest saved one, not the GUI's
+        // stale snapshot from before this foreign refresh.
+        let freshContent = RemoteHeader(sourceURL: url, interval: .manual)!
+            .storedContent(forFetched: "7.7.7.7 fresh.example.com\n")
+        foreignlyModifyWorkspace { try $0.updateProfileContent(profileID, content: freshContent) }
+
+        let outcome = await store.editRemoteProfile(profileID, sourceURL: url, interval: .sixHours)
+
+        XCTAssertEqual(outcome, .updated)
+        XCTAssertEqual(
+            store.profile(profileID)?.content,
+            "#!hostflip-remote https://example.com/hosts.txt interval=6h\n7.7.7.7 fresh.example.com\n"
+        )
+    }
+
+    @MainActor
+    func testASourceURLEditAgainstAForeignRetargetIsRefused() async throws {
+        let content = RemoteContentStub()
+        let oldURL = URL(string: "https://example.com/hosts.txt")!
+        let newURL = URL(string: "https://mirror.example.net/hosts.txt")!
+        content.set(oldURL, .success("1.1.1.1 old.example.com\n"))
+        content.set(newURL, .success("2.2.2.2 new.example.com\n"))
+        let store = makeStore(coordinator: SwitchCoordinatingStub(), fetchRemoteContent: {
+            try content.fetch($0)
+        })
+        let profileID = try await createRemoteProfile(in: store, url: oldURL)
+        // A foreign writer retargets the profile while the edit's validation fetch is in
+        // flight; the edit was confirmed against the old header and must not overwrite.
+        let foreignContent = RemoteHeader(sourceURL: URL(string: "https://third.example.org/x")!)!
+            .storedContent(forFetched: "9.9.9.9 foreign.example.com\n")
+        let root: URL = rootDirectory
+        content.setBeforeFetch {
+            let workspace = Workspace(rootDirectory: root)
+            var model = try workspace.openReadOnly()
+            try model.updateProfileContent(profileID, content: foreignContent)
+            try workspace.save(model)
+        }
+
+        let outcome = await store.editRemoteProfile(profileID, sourceURL: newURL, interval: .oneHour)
+
+        XCTAssertEqual(outcome, .failed("The profile was changed outside this dialog."))
+        XCTAssertEqual(store.profile(profileID)?.content, foreignContent)
+        XCTAssertEqual(try reloadModel().profile(profileID)?.content, foreignContent)
+    }
+
+    @MainActor
+    func testEditRemoteProfileRefusesWhenTheProfileIsNoLongerRemote() async throws {
+        let content = RemoteContentStub()
+        let url = URL(string: "https://example.com/hosts.txt")!
+        content.set(url, .success("1.1.1.1 v1.example.com\n"))
+        let store = makeStore(coordinator: SwitchCoordinatingStub(), fetchRemoteContent: {
+            try content.fetch($0)
+        })
+        let profileID = try await createRemoteProfile(in: store, url: url)
+        store.convertRemoteProfileToLocal(profileID)
+        let contentBefore = try XCTUnwrap(store.profile(profileID)).content
+
+        let outcome = await store.editRemoteProfile(profileID, sourceURL: url, interval: .oneHour)
+
+        guard case .failed = outcome else {
+            return XCTFail("expected a refusal, got \(outcome)")
+        }
+        XCTAssertEqual(store.profile(profileID)?.content, contentBefore)
+    }
+
+    @MainActor
+    private func createRemoteProfile(
+        in store: WorkspaceStore,
+        url: URL = URL(string: "https://example.com/hosts.txt")!,
+        name: String = "Remote"
+    ) async throws -> Profile.ID {
+        let outcome = await store.createRemoteProfile(sourceURL: url, name: name, interval: .manual)
+        guard case .created(let profileID) = outcome else {
+            XCTFail("expected creation, got \(outcome)")
+            throw StubError()
+        }
+        return profileID
+    }
+
     /// Simulates a foreign writer (e.g. the CLI): mutates the on-disk state through an independent
     /// Workspace instance, bypassing the store's in-memory model.
     private func foreignlyModifyWorkspace(_ change: (inout ActivationModel) throws -> Void) {
@@ -1604,21 +3051,48 @@ final class WorkspaceStoreTests: XCTestCase {
     // MARK: - Helpers
 
     @MainActor
-    private func makeStore(coordinator: some SwitchCoordinating) -> WorkspaceStore {
-        makeStore(coordinator: coordinator, driftMonitor: nil)
+    private func makeStore(
+        coordinator: some SwitchCoordinating,
+        fetchRemoteContent: @escaping @Sendable (URL) async throws -> String = { _ in
+            throw StubError()
+        }
+    ) -> WorkspaceStore {
+        makeStore(coordinator: coordinator, driftMonitor: nil, fetchRemoteContent: fetchRemoteContent)
     }
 
     @MainActor
     private func makeStore(
         coordinator: some SwitchCoordinating,
         driftMonitor: (any HostsDriftMonitoring)?,
-        systemHosts: Data = Data(WorkspaceStoreTests.importedHosts.utf8)
+        systemHosts: Data = Data(WorkspaceStoreTests.importedHosts.utf8),
+        fetchRemoteContent: @escaping @Sendable (URL) async throws -> String = { _ in
+            throw StubError()
+        }
+    ) -> WorkspaceStore {
+        // Content-only fetches wrap into the conditional seam; tests that exercise the
+        // conditional protocol itself inject a full outcome through the overload below.
+        makeStore(
+            coordinator: coordinator,
+            driftMonitor: driftMonitor,
+            systemHosts: systemHosts,
+            fetchRemote: { url, _ in .content(try await fetchRemoteContent(url), validators: nil) }
+        )
+    }
+
+    @MainActor
+    private func makeStore(
+        coordinator: some SwitchCoordinating,
+        driftMonitor: (any HostsDriftMonitoring)? = nil,
+        systemHosts: Data = Data(WorkspaceStoreTests.importedHosts.utf8),
+        fetchRemote: @escaping @Sendable (URL, RemoteContentValidators?) async throws -> RemoteFetchOutcome
     ) -> WorkspaceStore {
         let store = WorkspaceStore(
             workspace: Workspace(rootDirectory: rootDirectory),
             coordinator: coordinator,
             driftMonitor: driftMonitor,
-            readSystemHosts: { systemHosts }
+            readSystemHosts: { systemHosts },
+            fetchRemote: fetchRemote,
+            now: { Self.refreshClock }
         )
         store.loadIfNeeded()
         return store

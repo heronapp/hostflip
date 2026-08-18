@@ -168,6 +168,33 @@ final class MergedHostsTests: XCTestCase {
         """)
     }
 
+    func testARemoteProfilesHeaderLineFlowsIntoTheMergedOutput() throws {
+        // Q18 (ADR-0012): the Remote Header is ordinary first-line content, so the merge carries
+        // it verbatim and the /etc/hosts block shows the Source URL for traceability.
+        let remoteProfile = Profile(
+            id: .init("remote-profile"),
+            name: "GitHub520",
+            content: "#!hostflip-remote https://example.com/hosts.txt interval=6h\n140.82.113.3 github.com\n"
+        )
+        let model = try ActivationModel(
+            baseHosts: BaseHosts(content: "127.0.0.1 localhost\n"),
+            standaloneProfiles: [remoteProfile],
+            groups: [],
+            activeProfileIDs: [remoteProfile.id]
+        )
+
+        XCTAssertEqual(model.mergedHosts.content, """
+        127.0.0.1 localhost
+
+        # ══ hostflip:begin — delete through hostflip:end to remove ══
+        # ── GitHub520 ──
+        #!hostflip-remote https://example.com/hosts.txt interval=6h
+        140.82.113.3 github.com
+        # ══ hostflip:end ══
+
+        """)
+    }
+
     func testHashMatchesAKnownSHA256VectorComputedIndependently() throws {
         let model = try ActivationModel(
             baseHosts: BaseHosts(content: "127.0.0.1 localhost\n"),

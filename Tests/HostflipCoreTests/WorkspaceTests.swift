@@ -65,6 +65,36 @@ final class WorkspaceTests: XCTestCase {
         XCTAssertEqual(try contentsOfWorkspaceFile("profiles/Blocker.hosts"), "0.0.0.0 ads.example.com")
     }
 
+    func testARemoteProfileRoundTripsWithItsIdentityCarriedByTheFileAlone() throws {
+        let workspace = Workspace(rootDirectory: rootDirectory)
+        _ = try workspace.open(systemHosts: { "127.0.0.1 localhost" })
+        let remoteProfile = Profile(
+            id: .init("remote-profile"),
+            name: "Remote Profile",
+            content: "#!hostflip-remote https://example.com/hosts.txt interval=6h\n1.2.3.4 a.example.com\n"
+        )
+        let model = try ActivationModel(
+            baseHosts: BaseHosts(content: "127.0.0.1 localhost"),
+            standaloneProfiles: [remoteProfile],
+            groups: []
+        )
+
+        try workspace.save(model)
+        let reloaded = try workspace.openReadOnly()
+
+        XCTAssertEqual(
+            reloaded.standaloneProfiles.first?.remoteHeader,
+            RemoteHeader(sourceURL: URL(string: "https://example.com/hosts.txt")!, interval: .sixHours)
+        )
+        // The manifest gains no remote fields (ADR-0012): the content file's first line is the
+        // sole carrier, so a manifest written by an older app cannot strip the remote identity.
+        let manifest = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: Data(contentsOf: rootDirectory.appendingPathComponent("manifest.json"))
+        ) as? [String: Any])
+        let entry = try XCTUnwrap((manifest["standaloneProfiles"] as? [[String: Any]])?.first)
+        XCTAssertEqual(Set(entry.keys), ["id", "name", "file"])
+    }
+
     func testSavingAnUpdatedBaseHostsSnapshotDoesNotTouchTheOriginalBackup() throws {
         let workspace = Workspace(rootDirectory: rootDirectory)
         var model = try workspace.open(systemHosts: { "127.0.0.1 localhost" })
@@ -608,6 +638,87 @@ final class WorkspaceTests: XCTestCase {
         XCTAssertThrowsError(try workspace.save(applying: { _ in })) { error in
             XCTAssertEqual(error as? WorkspaceError, .notInitialized)
         }
+    }
+
+    // MARK: - Remote refresh runtime state (ADR-0012)
+
+    func testRemoteRefreshStateRoundTripsThroughTheManifest() throws {
+        let workspace = Workspace(rootDirectory: rootDirectory)
+        var model = try workspace.open(systemHosts: { "127.0.0.1 localhost" })
+        let header = RemoteHeader(sourceURL: URL(string: "https://example.com/hosts.txt")!)!
+        try model.addProfile(
+            id: .init("remote"),
+            name: "Remote",
+            content: header.storedContent(forFetched: "1.2.3.4 a.example.com\n")
+        )
+        // A whole second: the manifest stores ISO8601, which carries no sub-second precision.
+        let succeededAt = Date(timeIntervalSince1970: 1_755_000_000)
+        let validators = RemoteContentValidators(
+            etag: "W/\"abc123\"",
+            lastModified: "Mon, 17 Aug 2026 00:00:00 GMT"
+        )
+        try model.recordRemoteRefreshSuccess(.init("remote"), at: succeededAt, validators: validators)
+        try model.recordRemoteRefreshFailure(.init("remote"))
+        try workspace.save(model)
+
+        let reloaded = try reopenWithoutImporting(workspace)
+
+        XCTAssertEqual(
+            reloaded.profile(.init("remote"))?.remoteRefreshState,
+            RemoteRefreshState(
+                lastSuccessAt: succeededAt,
+                lastAttemptFailed: true,
+                validators: validators
+            )
+        )
+    }
+
+    func testALegacyManifestRewriteStripsTheRefreshStateButKeepsTheSubscription() throws {
+        // ADR-0012's degradation promise: an old app version decodes the manifest ignoring
+        // the unknown remoteRefresh key and silently strips it on its next save; that round
+        // trip may cost the display state but never the subscription, which lives in the
+        // content's Remote Header.
+        let workspace = Workspace(rootDirectory: rootDirectory)
+        var model = try workspace.open(systemHosts: { "127.0.0.1 localhost" })
+        let header = RemoteHeader(sourceURL: URL(string: "https://example.com/hosts.txt")!)!
+        try model.addProfile(
+            id: .init("remote"),
+            name: "Remote",
+            content: header.storedContent(forFetched: "1.2.3.4 a.example.com\n")
+        )
+        try model.recordRemoteRefreshSuccess(.init("remote"), at: Date(timeIntervalSince1970: 1_755_000_000))
+        try workspace.save(model)
+
+        // The v1 manifest shape as an old version knows it: decoding drops remoteRefresh,
+        // re-encoding writes the manifest without it.
+        struct LegacyProfile: Codable {
+            var id: String
+            var name: String
+            var file: String
+        }
+        struct LegacyGroup: Codable {
+            var id: String
+            var name: String
+            var profiles: [LegacyProfile]
+        }
+        struct LegacyManifest: Codable {
+            var version: Int
+            var standaloneProfiles: [LegacyProfile]
+            var groups: [LegacyGroup]
+            var activeProfileIDs: [String]
+            var isPaused: Bool
+            var lastWrittenHash: String?
+        }
+        let manifestURL = rootDirectory.appendingPathComponent("manifest.json")
+        let legacy = try JSONDecoder().decode(LegacyManifest.self, from: Data(contentsOf: manifestURL))
+        try JSONEncoder().encode(legacy).write(to: manifestURL, options: .atomic)
+
+        let reloaded = try reopenWithoutImporting(workspace)
+
+        let profile = try XCTUnwrap(reloaded.profile(.init("remote")))
+        XCTAssertNil(profile.remoteRefreshState)
+        XCTAssertEqual(profile.remoteHeader, header)
+        XCTAssertEqual(RemoteHeader.storedBody(of: profile.content), "1.2.3.4 a.example.com\n")
     }
 
     /// Holds the kernel-exclusive flock on manifest.lock through an independently opened descriptor,

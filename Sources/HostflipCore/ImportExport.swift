@@ -130,6 +130,42 @@ public enum ImportReader {
     }
 }
 
+/// What one import batch contains (#69), shown to the user after a successful import. The Source
+/// URLs surface every Remote Profile that came in — the user must see what will fetch from the
+/// network in the future, even though the import itself never goes online.
+public struct ImportSummary: Equatable, Sendable {
+    public var profileCount: Int
+    /// The Source URL of each imported Remote Profile, one entry per profile in import order;
+    /// empty when nothing in the batch is remote.
+    public var remoteSourceURLs: [String]
+
+    public init(profileCount: Int, remoteSourceURLs: [String]) {
+        self.profileCount = profileCount
+        self.remoteSourceURLs = remoteSourceURLs
+    }
+
+    public init(of contents: [ImportedContent]) {
+        profileCount = 0
+        remoteSourceURLs = []
+        for content in contents {
+            switch content {
+            case .snapshot(let snapshot):
+                for profile in snapshot.standaloneProfiles { add(profile.content) }
+                for profile in snapshot.groups.flatMap(\.profiles) { add(profile.content) }
+            case .plainText(_, let text):
+                add(text)
+            }
+        }
+    }
+
+    private mutating func add(_ content: String) {
+        profileCount += 1
+        if let header = RemoteHeader.parse(fromContent: content) {
+            remoteSourceURLs.append(header.sourceURL.absoluteString)
+        }
+    }
+}
+
 extension ActivationModel {
     /// Appends the snapshot as new, inactive profiles and groups after the existing ones (ADR-0008).
     /// Every object gets a fresh ID; names are kept verbatim, so same-named objects coexist rather
