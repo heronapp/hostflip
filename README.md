@@ -4,7 +4,7 @@ Native macOS hosts switcher. Flip between `/etc/hosts` profiles from your menu b
 
 **Free and open source (MIT).** From the makers of [Heron](https://getheron.app/) — debug your iPhone's web traffic and console, from your Mac.
 
-![hostflip main window: profile groups in the sidebar, the merged system hosts on the right](docs/screenshots/main-window.png)
+![hostflip main window: profile groups in the sidebar, a remote profile with its source and freshness on the right](docs/screenshots/main-window.png)
 
 ## Why hostflip
 
