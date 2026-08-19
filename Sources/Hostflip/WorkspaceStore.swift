@@ -60,6 +60,13 @@ enum ImportOutcome: Equatable {
     case failed(String)
 }
 
+/// Result of one SwitchHosts import (#74): the full mapping report on success — counts,
+/// transposed Remote Profiles, skips, and semantic shifts — or a failure with zero change.
+enum SwitchHostsImportOutcome: Equatable {
+    case imported(SwitchHostsImportSummary)
+    case failed(String)
+}
+
 /// Result of the create-remote-profile flow (ADR-0012): success dismisses the dialog and selects
 /// the new profile; failure keeps it open with display copy so the user can retry or cancel.
 enum RemoteProfileCreationOutcome: Equatable {
@@ -1517,29 +1524,58 @@ final class WorkspaceStore {
                     }
                 }
             }
-            // Imports commit only when the save succeeds, so this path stays off persistByReplaying,
-            // whose disk-failure fallback would keep the imported content in memory.
-            if saveError == nil {
-                switch try workspace.save(applying: applyImports) {
-                case .saved(let saved):
-                    model = saved
-                case .conflict(let latest, let reason):
-                    model = latest
-                    throw reason
-                }
-            } else {
-                guard var updated = model else {
-                    return .failed(String(localized: "Nothing was imported: the workspace is not loaded."))
-                }
-                try applyImports(&updated)
-                try workspace.save(updated)
-                model = updated
-                saveError = nil
-            }
+            try commitImportBatch(applying: applyImports)
             return .imported(ImportSummary(of: contents))
         } catch {
             return .failed(Self.importFailureMessage(for: error))
         }
+    }
+
+    /// One-click SwitchHosts migration (#74/#75, ADR-0013): reads whatever generation the
+    /// directory holds offline, maps it to native profiles, and applies the plan through
+    /// the same commit path as importFiles — inactive content, no applyEdit, and any parse
+    /// failure means zero change. The detected format rides on the summary; the mapping
+    /// engine never sees it.
+    func importSwitchHosts(at directory: URL) -> SwitchHostsImportOutcome {
+        guard model != nil else {
+            return .failed(String(localized: "Nothing was imported: the workspace is not loaded."))
+        }
+        do {
+            let (data, format) = try SwitchHostsReader.read(at: directory)
+            var plan = SwitchHostsMapper.plan(for: data)
+            plan.summary.detectedFormat = format
+            try commitImportBatch { [plan] in try $0.importSnapshot(plan.snapshot) }
+            return .imported(plan.summary)
+        } catch {
+            return .failed(Self.switchHostsImportFailureMessage(for: error))
+        }
+    }
+
+    /// Shared commit path of the import entries: the batch commits only when the save
+    /// succeeds, so imports stay off persistByReplaying, whose disk-failure fallback would
+    /// keep the imported content in memory.
+    private func commitImportBatch(applying applyImports: (inout ActivationModel) throws -> Void) throws {
+        if saveError == nil {
+            switch try workspace.save(applying: applyImports) {
+            case .saved(let saved):
+                model = saved
+            case .conflict(let latest, let reason):
+                model = latest
+                throw reason
+            }
+        } else {
+            guard var updated = model else {
+                throw ImportCommitError.workspaceNotLoaded
+            }
+            try applyImports(&updated)
+            try workspace.save(updated)
+            model = updated
+            saveError = nil
+        }
+    }
+
+    private enum ImportCommitError: Error {
+        case workspaceNotLoaded
     }
 
     /// A portable snapshot of every profile and the group structure; Base Hosts and active state
@@ -1555,6 +1591,9 @@ final class WorkspaceStore {
     }
 
     private static func importFailureMessage(for error: any Error) -> String {
+        if case ImportCommitError.workspaceNotLoaded = error {
+            return String(localized: "Nothing was imported: the workspace is not loaded.")
+        }
         guard let failure = error as? ImportFileFailure else {
             return String(localized: "Nothing was imported: \(String(describing: error))")
         }
@@ -1571,6 +1610,19 @@ final class WorkspaceStore {
             "\(failure.underlying)"
         }
         return String(localized: "Nothing was imported. \(failure.fileName): \(reason).")
+    }
+
+    private static func switchHostsImportFailureMessage(for error: any Error) -> String {
+        switch error {
+        case SwitchHostsImportError.dataNotFound:
+            String(localized: "Nothing was imported: no SwitchHosts data was found in that folder.")
+        case SwitchHostsImportError.malformedData(let file):
+            String(localized: "Nothing was imported: the SwitchHosts data could not be read (\(file)).")
+        case ImportCommitError.workspaceNotLoaded:
+            String(localized: "Nothing was imported: the workspace is not loaded.")
+        default:
+            String(localized: "Nothing was imported: \(String(describing: error))")
+        }
     }
 
     // MARK: - Persisting and follow-up merging

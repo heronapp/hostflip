@@ -71,6 +71,11 @@ struct HostflipApp: App {
             MainWindowView(store: store, maintenanceStore: maintenanceStore)
                 .onAppear {
                     dockIconStore.mainWindowDidOpen()
+                    // Deferred so the window paints before the one-time SwitchHosts
+                    // suggestion's modal alert can block the run loop (#75).
+                    Task { @MainActor in
+                        SwitchHostsImportFlow.offerSuggestionIfNeeded(store: store)
+                    }
                 }
                 .onDisappear {
                     dockIconStore.mainWindowDidClose()

@@ -178,6 +178,34 @@
 "Imported %lld profiles." = "%lld 件のプロファイルを読み込みました。";
 "Remote profiles will fetch content from these URLs:" = "リモートプロファイルの内容は次の URL から取得されます:";
 
+/* SwitchHosts import */
+"Import from SwitchHosts…" = "SwitchHosts から読み込む…";
+"SwitchHosts Import Complete" = "SwitchHosts の読み込み完了";
+"Imported 1 profile from SwitchHosts." = "SwitchHosts から 1 件のプロファイルを読み込みました。";
+"Imported %lld profiles from SwitchHosts." = "SwitchHosts から %lld 件のプロファイルを読み込みました。";
+"Created 1 group." = "1 件のグループを作成しました。";
+"Created %lld groups." = "%lld 件のグループを作成しました。";
+"1 remote rule became a Remote Profile and will fetch content from this URL:" = "1 件のリモートルールがリモートプロファイルに変換され、次の URL から内容を取得します:";
+"%lld remote rules became Remote Profiles and will fetch content from these URLs:" = "%lld 件のリモートルールがリモートプロファイルに変換され、次の URL から内容を取得します:";
+"Skipped:" = "スキップした項目:";
+"System hosts entries: %lld" = "システム hosts の項目: %lld";
+"History snapshots: %lld" = "履歴スナップショット: %lld";
+"Trashed items: %lld" = "ゴミ箱の項目: %lld";
+"Notes:" = "注意:";
+"Profiles in “%@” are now mutually exclusive; move a profile out of the group to stack it." = "「%@」内のプロファイルは今後互いに排他になります。重ねて適用するには、プロファイルをグループの外に移動してください。";
+"“%@” was expanded to a snapshot of its members and will no longer update with them." = "「%@」はメンバーの内容のスナップショットに展開され、今後メンバーに追随しません。";
+"“%@” will refresh every %@ instead of every %@." = "「%@」は今後 %@ ごとに更新されます（元は %@ ごと）。";
+"“%@” was imported as a local profile: %@ is not an HTTPS URL." = "「%@」はローカルプロファイルとして読み込まれました: %@ は HTTPS の URL ではありません。";
+"Nothing was imported: no SwitchHosts data was found in that folder." = "何も読み込まれませんでした: そのフォルダに SwitchHosts のデータが見つかりません。";
+"Nothing was imported: the SwitchHosts data could not be read (%@)." = "何も読み込まれませんでした: SwitchHosts のデータを読み取れません（%@）。";
+"Detected SwitchHosts v%lld data." = "SwitchHosts v%lld のデータを検出しました。";
+"Import from SwitchHosts?" = "SwitchHosts から読み込みますか？";
+"hostflip found existing SwitchHosts data on this Mac. Imported profiles arrive inactive, so nothing changes until you activate them. This suggestion appears only once; the File menu keeps an import entry." = "hostflip はこの Mac で SwitchHosts のデータを見つけました。読み込まれたプロファイルはすべて未適用の状態で追加されるため、適用するまで何も変わりません。この案内は一度だけ表示されます。以後も「ファイル」メニューから読み込めます。";
+"Import" = "読み込む";
+"Don’t Import" = "読み込まない";
+"Select your SwitchHosts data folder" = "SwitchHosts のデータフォルダを選択してください";
+"Choose Folder…" = "フォルダを選択…";
+
 /* Helper maintenance */
 "Helper Ready" = "ヘルパーは準備完了";
 "The helper is approved and ready to update the system hosts file." = "ヘルパーは承認済みで、システム hosts ファイルを更新できます。";
