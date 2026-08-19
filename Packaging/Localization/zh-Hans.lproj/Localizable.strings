@@ -178,6 +178,34 @@
 "Imported %lld profiles." = "已导入 %lld 个方案。";
 "Remote profiles will fetch content from these URLs:" = "远程方案将从以下 URL 获取内容：";
 
+/* SwitchHosts import */
+"Import from SwitchHosts…" = "从 SwitchHosts 导入…";
+"SwitchHosts Import Complete" = "SwitchHosts 导入完成";
+"Imported 1 profile from SwitchHosts." = "已从 SwitchHosts 导入 1 个方案。";
+"Imported %lld profiles from SwitchHosts." = "已从 SwitchHosts 导入 %lld 个方案。";
+"Created 1 group." = "创建了 1 个分组。";
+"Created %lld groups." = "创建了 %lld 个分组。";
+"1 remote rule became a Remote Profile and will fetch content from this URL:" = "1 条远程规则已转为远程方案，将从以下 URL 获取内容：";
+"%lld remote rules became Remote Profiles and will fetch content from these URLs:" = "%lld 条远程规则已转为远程方案，将从以下 URL 获取内容：";
+"Skipped:" = "已跳过：";
+"System hosts entries: %lld" = "系统 hosts 条目：%lld";
+"History snapshots: %lld" = "历史快照：%lld";
+"Trashed items: %lld" = "回收站条目：%lld";
+"Notes:" = "请注意：";
+"Profiles in “%@” are now mutually exclusive; move a profile out of the group to stack it." = "「%@」分组内的方案现为互斥；如需叠加生效，请将方案移出分组。";
+"“%@” was expanded to a snapshot of its members and will no longer update with them." = "「%@」已展开为其成员内容的快照，不再随成员更新。";
+"“%@” will refresh every %@ instead of every %@." = "「%@」将改为每 %@ 刷新一次（原为每 %@）。";
+"“%@” was imported as a local profile: %@ is not an HTTPS URL." = "「%@」已作为本地方案导入：%@ 不是 HTTPS URL。";
+"Nothing was imported: no SwitchHosts data was found in that folder." = "未导入任何内容：该文件夹中未找到 SwitchHosts 数据。";
+"Nothing was imported: the SwitchHosts data could not be read (%@)." = "未导入任何内容：SwitchHosts 数据无法读取（%@）。";
+"Detected SwitchHosts v%lld data." = "检测到 SwitchHosts v%lld 数据。";
+"Import from SwitchHosts?" = "从 SwitchHosts 导入？";
+"hostflip found existing SwitchHosts data on this Mac. Imported profiles arrive inactive, so nothing changes until you activate them. This suggestion appears only once; the File menu keeps an import entry." = "hostflip 在这台 Mac 上发现了 SwitchHosts 数据。导入的方案全部为未生效状态，在你启用之前不会有任何变化。此提示仅显示一次；之后仍可从「文件」菜单导入。";
+"Import" = "导入";
+"Don’t Import" = "不导入";
+"Select your SwitchHosts data folder" = "选择 SwitchHosts 数据文件夹";
+"Choose Folder…" = "选择文件夹…";
+
 /* Helper maintenance */
 "Helper Ready" = "辅助程序就绪";
 "The helper is approved and ready to update the system hosts file." = "辅助程序已获批准，可以更新系统 hosts 文件。";

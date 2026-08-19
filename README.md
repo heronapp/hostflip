@@ -85,6 +85,14 @@ To confirm the switch itself took effect, ask the system resolver directly: `dsc
 
 One adjacent trap: with DNS-over-HTTPS enabled (Chrome's "Secure DNS", Firefox's TRR), some configurations bypass `/etc/hosts` entirely. That shows up as hosts entries *never* working — different from needing a browser restart.
 
+**I clicked “Deactivate and Remove Helper”, but System Settings still lists Hostflip under App Background Activity.**
+
+The button did complete its job: the helper is unregistered from the system's background-task records, it stops running, and nothing of hostflip launches in the background afterwards — the status light drops to “Helper Not Installed”, and your next profile switch simply requests the helper again.
+
+The row under System Settings → General → Login Items & Extensions → App Background Activity belongs to macOS, not to the app. Its toggle records your permission for Hostflip to run background items, and macOS keeps showing the row while the app remains installed, whether or not anything is currently registered. Once you delete `Hostflip.app`, the row clears on its own (System Settings may need a relaunch, or occasionally a log-out, before it notices).
+
+There is no supported command to remove a single app's row. The only lever macOS offers is `sudo sfltool resetbtm`, which wipes the background-item records of **every** app on the machine and makes each one re-prompt — a troubleshooting measure of last resort, not part of a normal uninstall.
+
 ## Updating
 
 - Homebrew: `brew upgrade --cask hostflip`
@@ -100,7 +108,7 @@ An ad-hoc build verifies the packaging structure, but the XPC channel intentiona
 
 ## Uninstall
 
-Use “Deactivate and Remove Helper…” in the app first (unregisters the daemon), then delete `Hostflip.app`. `brew uninstall --zap --cask hostflip` also clears application data.
+Use “Deactivate and Remove Helper…” in the app first (unregisters the daemon), then delete `Hostflip.app`. `brew uninstall --zap --cask hostflip` also clears application data. The Hostflip row under App Background Activity in System Settings clears once the app is deleted — see the FAQ if it seems to linger.
 
 Note that `/etc/hosts` keeps whatever hostflip last wrote — uninstalling does not rewrite it. Everything hostflip added sits in a clearly fenced block at the bottom of the file (`# ══ hostflip:begin … ══` through `# ══ hostflip:end ══`), so leftover entries are easy to spot and delete by hand. Better still, turn off the master switch **before** removing the helper: that restores the file to exactly your baseline hosts, with no hostflip traces at all — once the helper is gone, hostflip can no longer write the file. Your pre-hostflip hosts file is also preserved as `hosts.orig` in `~/Library/Application Support/hostflip` until that folder is zapped.
 

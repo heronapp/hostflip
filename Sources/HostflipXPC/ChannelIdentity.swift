@@ -16,5 +16,5 @@ public enum ChannelIdentity {
 
 public enum HostflipBuild {
     /// Kept in sync with CFBundleShortVersionString in Packaging/HostflipApp-Info.plist.
-    public static let version = "0.2.0"
+    public static let version = "0.3.0"
 }

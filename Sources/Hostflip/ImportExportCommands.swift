@@ -14,6 +14,11 @@ struct ImportExportCommands: Commands {
             }
             .disabled(store.model == nil)
 
+            Button("Import from SwitchHosts…") {
+                SwitchHostsImportFlow.run(store: store)
+            }
+            .disabled(store.model == nil)
+
             Button("Export…") {
                 runExportPanel()
             }

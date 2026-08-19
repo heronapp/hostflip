@@ -1456,6 +1456,101 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertNil(store.followUpMergeTask)
     }
 
+    // MARK: - SwitchHosts import (#74)
+
+    @MainActor
+    func testSwitchHostsImportAppendsMappedContentInactiveWithoutMerging() throws {
+        let stub = SwitchCoordinatingStub()
+        let store = makeStore(coordinator: stub)
+        let directory = try writeSwitchHostsV4Directory(
+            tree: #"""
+            [
+             {"title": "dev", "id": "aaaa", "on": false},
+             {"type": "remote", "title": "Blocklist", "id": "rrrr",
+              "url": "https://rules.example/list.hosts", "refresh_interval": 86400, "on": false}
+            ]
+            """#,
+            records: [
+                "1": #"{"id": "aaaa", "content": "127.0.0.1 dev.example\n", "_id": "1"}"#,
+                "2": #"{"id": "rrrr", "content": "0.0.0.0 tracker.example\n", "_id": "2"}"#,
+            ]
+        )
+
+        let outcome = store.importSwitchHosts(at: directory)
+
+        XCTAssertEqual(outcome, .imported(SwitchHostsImportSummary(
+            profileCount: 2,
+            remoteProfiles: [.init(
+                profileName: "Blocklist",
+                sourceURL: "https://rules.example/list.hosts",
+                interval: .twentyFourHours
+            )],
+            detectedFormat: .v4
+        )))
+        XCTAssertEqual(store.standaloneProfiles.map(\.name), ["dev", "Blocklist"])
+        XCTAssertTrue(try XCTUnwrap(store.standaloneProfiles.last).isRemote)
+        XCTAssertEqual(store.model?.activeProfileIDs, [])
+        // Offline and purely local: nothing reaches the coordinator, no follow-up merge.
+        XCTAssertNil(store.followUpMergeTask)
+        XCTAssertTrue(stub.authorizedMerges.isEmpty)
+        XCTAssertTrue(stub.performedSwitches.isEmpty)
+        XCTAssertEqual(try reloadModel().standaloneProfiles.map(\.name), ["dev", "Blocklist"])
+    }
+
+    @MainActor
+    func testSwitchHostsImportAppliesNothingWhenTheDataIsMalformed() throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub())
+        let directory = try writeSwitchHostsV4Directory(
+            tree: #"[{"title": "dev", "id": "aaaa"}]"#,
+            records: ["1": "not json"]
+        )
+
+        let outcome = store.importSwitchHosts(at: directory)
+
+        guard case .failed(let message) = outcome else {
+            return XCTFail("the import must fail as a whole, got: \(outcome)")
+        }
+        XCTAssertTrue(message.contains("data/collection/hosts/data/1.json"), message)
+        XCTAssertTrue(store.standaloneProfiles.isEmpty)
+        XCTAssertTrue(try reloadModel().standaloneProfiles.isEmpty)
+    }
+
+    @MainActor
+    func testSwitchHostsImportReportsAMissingDataDirectory() throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub())
+
+        let outcome = store.importSwitchHosts(
+            at: rootDirectory.appendingPathComponent("no-switchhosts", isDirectory: true)
+        )
+
+        guard case .failed(let message) = outcome else {
+            return XCTFail("the import must fail, got: \(outcome)")
+        }
+        XCTAssertTrue(message.contains("that folder"), message)
+        XCTAssertTrue(store.standaloneProfiles.isEmpty)
+    }
+
+    /// A minimal v4 PotDb directory; record keys are the collection `_id`s listed in ids.json.
+    private func writeSwitchHostsV4Directory(
+        tree: String,
+        records: [String: String]
+    ) throws -> URL {
+        let root = rootDirectory.appendingPathComponent("switchhosts-v4", isDirectory: true)
+        let listDirectory = root.appendingPathComponent("data/list", isDirectory: true)
+        let dataDirectory = root.appendingPathComponent("data/collection/hosts/data", isDirectory: true)
+        try FileManager.default.createDirectory(at: listDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dataDirectory, withIntermediateDirectories: true)
+        try Data(tree.utf8).write(to: listDirectory.appendingPathComponent("tree.json"))
+        let ids = records.keys.sorted().map { "\"\($0)\"" }.joined(separator: ", ")
+        try Data("[\(ids)]".utf8).write(
+            to: dataDirectory.deletingLastPathComponent().appendingPathComponent("ids.json")
+        )
+        for (recordID, json) in records {
+            try Data(json.utf8).write(to: dataDirectory.appendingPathComponent("\(recordID).json"))
+        }
+        return root
+    }
+
     @MainActor
     func testExportedDataRoundTripsAsASnapshotOfCurrentProfiles() throws {
         let store = makeStore(coordinator: SwitchCoordinatingStub())
