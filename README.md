@@ -16,6 +16,7 @@ Editing `/etc/hosts` by hand — or typing your password every time a hosts mana
 - **Your baseline is protected.** On first run, your current `/etc/hosts` is imported as the read-only *Base Hosts* — always applied first, never lost, and the original file is kept as a permanent backup.
 - **External edits are respected, not clobbered.** If anything else modifies `/etc/hosts`, hostflip detects the drift and walks you through reconciling it in a diff view before it writes again.
 - **Pause everything.** One master switch restores your baseline hosts while remembering every profile's state.
+- **Switching from SwitchHosts? One click.** hostflip detects SwitchHosts data in any of its three generations (v3/v4/v5) and imports the lot: folders become groups, remote rules become Remote Profiles that keep refreshing on their own, and everything arrives inactive with a full summary of what came in, what was skipped, and what was adjusted.
 
 <p align="center">
   <img src="docs/screenshots/menu-bar.png" width="293" alt="Quick switching from the menu bar: standalone profiles on top, groups as submenus with each group's active profile shown as a badge">
@@ -70,7 +71,7 @@ Profile names are not unique — IDs are; pass `--id` when a name is ambiguous. 
 
 ## FAQ
 
-**I switched profiles, but my browser still resolves the old address.**
+### I switched profiles, but my browser still resolves the old address
 
 The system side is already complete — every write ends with a full DNS flush (`dscacheutil -flushcache` plus a `HUP` to `mDNSResponder`). What ignores it is the browser itself, in two layers: browsers keep a private DNS cache (roughly a minute), and — the bigger one — they keep established HTTP/2 and HTTP/3 connections alive for minutes. A reload rides an existing connection to the old address without resolving anything, which is why the behavior looks random and why restarting the browser "fixes" it. No hosts switcher can reach inside another process to clear these.
 
@@ -85,7 +86,7 @@ To confirm the switch itself took effect, ask the system resolver directly: `dsc
 
 One adjacent trap: with DNS-over-HTTPS enabled (Chrome's "Secure DNS", Firefox's TRR), some configurations bypass `/etc/hosts` entirely. That shows up as hosts entries *never* working — different from needing a browser restart.
 
-**I clicked “Deactivate and Remove Helper”, but System Settings still lists Hostflip under App Background Activity.**
+### I clicked “Deactivate and Remove Helper”, but System Settings still lists Hostflip under App Background Activity
 
 The button did complete its job: the helper is unregistered from the system's background-task records, it stops running, and nothing of hostflip launches in the background afterwards — the status light drops to “Helper Not Installed”, and your next profile switch simply requests the helper again.
 
