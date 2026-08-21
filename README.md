@@ -2,7 +2,7 @@
 
 Native macOS hosts switcher. Flip between `/etc/hosts` profiles from your menu bar — no password prompt, no Electron, no fuss.
 
-**Free and open source (MIT).** From the makers of [Heron](https://getheron.app/) — debug your iPhone's web traffic and console, from your Mac.
+**Free and open source (MIT).**
 
 ![hostflip main window: profile groups in the sidebar, a remote profile with its source and freshness on the right](docs/screenshots/main-window.png)
 
@@ -112,6 +112,10 @@ An ad-hoc build verifies the packaging structure, but the XPC channel intentiona
 Use “Deactivate and Remove Helper…” in the app first (unregisters the daemon), then delete `Hostflip.app`. `brew uninstall --zap --cask hostflip` also clears application data. The Hostflip row under App Background Activity in System Settings clears once the app is deleted — see the FAQ if it seems to linger.
 
 Note that `/etc/hosts` keeps whatever hostflip last wrote — uninstalling does not rewrite it. Everything hostflip added sits in a clearly fenced block at the bottom of the file (`# ══ hostflip:begin … ══` through `# ══ hostflip:end ══`), so leftover entries are easy to spot and delete by hand. Better still, turn off the master switch **before** removing the helper: that restores the file to exactly your baseline hosts, with no hostflip traces at all — once the helper is gone, hostflip can no longer write the file. Your pre-hostflip hosts file is also preserved as `hosts.orig` in `~/Library/Application Support/hostflip` until that folder is zapped.
+
+## About
+
+hostflip is made by the team behind [Heron](https://getheron.app/), a paid macOS app for debugging iPhone web traffic. hostflip is MIT-licensed and standalone — it has no dependency on Heron.
 
 ## License
 
