@@ -223,4 +223,64 @@ final class MergedHostsTests: XCTestCase {
 
         XCTAssertNotEqual(model.mergedHosts.hash, inactiveHash)
     }
+    // MARK: - Appended-block removal at capture (#83)
+
+    private static let fencedFile = "127.0.0.1 localhost\n\n"
+        + MergedHosts.appendedBlockBegin + "\n"
+        + "# ── Dev ──\n10.0.0.5 dev.local\n"
+        + MergedHosts.appendedBlockEnd + "\n"
+
+    func testRemovingTheAppendedBlockKeepsTheBaseline() {
+        XCTAssertEqual(
+            MergedHosts.removingAppendedBlock(from: Self.fencedFile),
+            "127.0.0.1 localhost\n"
+        )
+    }
+
+    func testContentAfterTheBlockSurvivesRemoval() {
+        let content = Self.fencedFile + "\n9.9.9.9 appended-later.local\n"
+        XCTAssertEqual(
+            MergedHosts.removingAppendedBlock(from: content),
+            "127.0.0.1 localhost\n9.9.9.9 appended-later.local\n"
+        )
+    }
+
+    func testABeginWithoutAnEndLeavesTheContentUnchanged() {
+        let content = "127.0.0.1 localhost\n" + MergedHosts.appendedBlockBegin + "\n10.0.0.5 dev.local\n"
+        XCTAssertEqual(MergedHosts.removingAppendedBlock(from: content), content)
+    }
+
+    func testABlockWithNothingBeforeItLeavesTheContentUnchanged() {
+        let content = MergedHosts.appendedBlockBegin + "\n10.0.0.5 dev.local\n"
+            + MergedHosts.appendedBlockEnd + "\n"
+        XCTAssertEqual(MergedHosts.removingAppendedBlock(from: content), content)
+        let whitespaceOnly = "\n\n" + content
+        XCTAssertEqual(MergedHosts.removingAppendedBlock(from: whitespaceOnly), whitespaceOnly)
+    }
+
+    func testTwoSuccessiveBlocksAreBothRemoved() {
+        let twicePolluted = "127.0.0.1 localhost\n\n"
+            + MergedHosts.appendedBlockBegin + "\n10.0.0.5 old.local\n" + MergedHosts.appendedBlockEnd + "\n"
+            + "\n" + MergedHosts.appendedBlockBegin + "\n10.0.0.6 older.local\n" + MergedHosts.appendedBlockEnd + "\n"
+        XCTAssertEqual(
+            MergedHosts.removingAppendedBlock(from: twicePolluted),
+            "127.0.0.1 localhost\n"
+        )
+    }
+
+    func testAnOrphanBeginNeverPairsWithALaterBlocksEnd() {
+        // The user deleted only the end line of an old fence and added entries after it;
+        // pairing the orphan begin with the later block's end would swallow those entries.
+        let content = "127.0.0.1 localhost\n"
+            + MergedHosts.appendedBlockBegin + "\n"
+            + "203.0.113.9 work.internal\n"
+            + MergedHosts.appendedBlockBegin + "\n10.0.0.5 dev.local\n" + MergedHosts.appendedBlockEnd + "\n"
+        XCTAssertEqual(MergedHosts.removingAppendedBlock(from: content), content)
+    }
+
+    func testTheBlockMarkersInsideLongerLinesDoNotMatch() {
+        let content = "127.0.0.1 localhost\n# about " + MergedHosts.appendedBlockBegin + "\n10.0.0.5 dev.local\n"
+        XCTAssertEqual(MergedHosts.removingAppendedBlock(from: content), content)
+    }
+
 }

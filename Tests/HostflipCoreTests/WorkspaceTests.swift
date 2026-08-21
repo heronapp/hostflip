@@ -39,6 +39,43 @@ final class WorkspaceTests: XCTestCase {
         XCTAssertEqual(try reopenWithoutImporting(workspace).baseHosts.content, "127.0.0.1 localhost\n")
     }
 
+    func testFirstCaptureLeavesAPreviousInstallsAppendedBlockOutOfBaseHosts() throws {
+        let workspace = Workspace(rootDirectory: rootDirectory)
+        let systemHosts = "127.0.0.1 localhost\n\n"
+            + MergedHosts.appendedBlockBegin + "\n"
+            + "# ── Dev ──\n10.0.0.5 dev.local\n"
+            + MergedHosts.appendedBlockEnd + "\n"
+
+        var model = try workspace.open(systemHosts: { systemHosts })
+
+        XCTAssertEqual(model.baseHosts.content, "127.0.0.1 localhost\n")
+        XCTAssertEqual(try contentsOfWorkspaceFile("hosts.orig"), systemHosts)
+
+        // Re-activating a profile produces a single fence, not a nested one.
+        model = try ActivationModel(
+            baseHosts: model.baseHosts,
+            standaloneProfiles: [Profile(id: .init("dev"), name: "Dev", content: "10.0.0.5 dev.local\n")],
+            groups: []
+        )
+        try model.toggleProfile(.init("dev"))
+        XCTAssertEqual(
+            model.mergedHosts.content.components(separatedBy: MergedHosts.appendedBlockBegin).count,
+            2
+        )
+    }
+
+    func testFirstCaptureStripsBothManagersBlocksFromOneFile() throws {
+        let workspace = Workspace(rootDirectory: rootDirectory)
+        let systemHosts = "127.0.0.1 localhost\n\n"
+            + MergedHosts.appendedBlockBegin + "\n10.0.0.5 dev.local\n" + MergedHosts.appendedBlockEnd + "\n"
+            + "\n# --- SWITCHHOSTS_CONTENT_START ---\n\n10.0.0.1 api.example.com\n"
+
+        let model = try workspace.open(systemHosts: { systemHosts })
+
+        XCTAssertEqual(model.baseHosts.content, "127.0.0.1 localhost\n")
+        XCTAssertEqual(try contentsOfWorkspaceFile("hosts.orig"), systemHosts)
+    }
+
     func testFirstCaptureWithASwitchHostsBlockReportsNoDriftBeforeTheFirstWrite() throws {
         let workspace = Workspace(rootDirectory: rootDirectory)
         let systemHosts = "127.0.0.1 localhost\n\n# --- SWITCHHOSTS_CONTENT_START ---\n\n10.0.0.1 api.example.com\n"

@@ -30,6 +30,67 @@ extension MergedHosts {
     public static let appendedBlockBegin =
         "# ══ hostflip:begin — delete through hostflip:end to remove ══"
     public static let appendedBlockEnd = "# ══ hostflip:end ══"
+
+    /// Captured content with this manager's own appended block removed (#83): a workspace
+    /// deleted while profiles were active leaves the previous install's block in the file,
+    /// and — like the SwitchHosts marker (#81) — it is manager-owned output, not the user's
+    /// baseline. The block spans the first line that is exactly `appendedBlockBegin` through
+    /// the next line that is exactly `appendedBlockEnd`; content after the block is kept.
+    /// A begin without an end, or a block with nothing but whitespace before it, returns the
+    /// content unchanged — malformed shapes are not guessed at, and an empty Base Hosts would
+    /// make a no-profile write empty the system hosts. Removal repeats while blocks remain,
+    /// so a file polluted by two successive deleted installs comes fully clean. (A profile
+    /// whose own content contains the exact end fence line would cut its block short — no
+    /// hosts content has a reason to carry that line, so the shape is not guarded against.)
+    public static func removingAppendedBlock(from content: String) -> String {
+        var content = content
+        while true {
+            let removed = removingFirstAppendedBlock(from: content)
+            if removed == content { return content }
+            content = removed
+        }
+    }
+
+    private static func removingFirstAppendedBlock(from content: String) -> String {
+        guard let begin = lineRange(ofExact: appendedBlockBegin, in: content, from: content.startIndex),
+              let end = lineRange(ofExact: appendedBlockEnd, in: content, from: begin.upperBound)
+        else { return content }
+        // An orphan begin must not pair with a LATER block's end — everything in between,
+        // the user's own lines included, would silently go with it. A second begin before
+        // the end marks the shape malformed, and malformed shapes are not guessed at.
+        if let nextBegin = lineRange(ofExact: appendedBlockBegin, in: content, from: begin.upperBound),
+           nextBegin.lowerBound < end.lowerBound {
+            return content
+        }
+        let head = content[..<begin.lowerBound]
+        guard let lastContent = head.lastIndex(where: { !$0.isWhitespace }) else { return content }
+        var tail = content[end.upperBound...]
+        while let first = tail.first, first.isNewline {
+            tail = tail.dropFirst()
+        }
+        let newline = head.contains("\r\n") ? "\r\n" : "\n"
+        return head[...lastContent] + newline + tail
+    }
+
+    /// The first line in `content` at or after `start` whose whole content is `line`, as the
+    /// range from the line's start through its newline (`Character.isNewline` treats CRLF as
+    /// one grapheme). Nil when no such line exists. Shared with the SwitchHosts capture strip.
+    static func lineRange(
+        ofExact line: String,
+        in content: String,
+        from start: String.Index
+    ) -> Range<String.Index>? {
+        var lineStart = start
+        while lineStart < content.endIndex {
+            let lineEnd = content[lineStart...].firstIndex(where: \.isNewline) ?? content.endIndex
+            let after = lineEnd < content.endIndex ? content.index(after: lineEnd) : content.endIndex
+            if content[lineStart..<lineEnd] == line {
+                return lineStart..<after
+            }
+            lineStart = after
+        }
+        return nil
+    }
     /// The banner releases up to 0.1.1 wrote at the top of the file; still
     /// recognized wherever generated output must be detected.
     public static let legacyGeneratedBanner =

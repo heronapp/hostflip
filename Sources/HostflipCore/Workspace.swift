@@ -73,9 +73,12 @@ public struct Workspace: Sendable {
         try FileManager.default.createDirectory(at: profilesDirectory, withIntermediateDirectories: true)
         try writeOriginalBackupIfAbsent(content)
 
-        // hosts.orig keeps the file as found; Base Hosts leaves out a SwitchHosts block (#81).
+        // hosts.orig keeps the file as found; Base Hosts leaves out manager-owned blocks —
+        // a previous install's own appended block (#83) and a SwitchHosts block (#81).
         let model = try ActivationModel(
-            baseHosts: BaseHosts(content: SwitchHostsResidue.stripped(from: content)),
+            baseHosts: BaseHosts(
+                content: SwitchHostsResidue.stripped(from: MergedHosts.removingAppendedBlock(from: content))
+            ),
             standaloneProfiles: [],
             groups: []
         )
