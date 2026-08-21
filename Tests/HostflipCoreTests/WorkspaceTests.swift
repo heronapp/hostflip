@@ -28,6 +28,27 @@ final class WorkspaceTests: XCTestCase {
         XCTAssertTrue(workspaceFileExists("manifest.json"))
     }
 
+    func testFirstCaptureLeavesTheSwitchHostsBlockOutOfBaseHostsButKeepsItInTheBackup() throws {
+        let workspace = Workspace(rootDirectory: rootDirectory)
+        let systemHosts = "127.0.0.1 localhost\n\n# --- SWITCHHOSTS_CONTENT_START ---\n\n10.0.0.1 api.example.com\n"
+
+        let model = try workspace.open(systemHosts: { systemHosts })
+
+        XCTAssertEqual(model.baseHosts.content, "127.0.0.1 localhost\n")
+        XCTAssertEqual(try contentsOfWorkspaceFile("hosts.orig"), systemHosts)
+        XCTAssertEqual(try reopenWithoutImporting(workspace).baseHosts.content, "127.0.0.1 localhost\n")
+    }
+
+    func testFirstCaptureWithASwitchHostsBlockReportsNoDriftBeforeTheFirstWrite() throws {
+        let workspace = Workspace(rootDirectory: rootDirectory)
+        let systemHosts = "127.0.0.1 localhost\n\n# --- SWITCHHOSTS_CONTENT_START ---\n\n10.0.0.1 api.example.com\n"
+        _ = try workspace.open(systemHosts: { systemHosts })
+
+        // The system file still holds the full content until hostflip writes, and so does the baseline.
+        XCTAssertNil(try workspace.lastWrittenHash())
+        XCTAssertEqual(try workspace.expectedSystemHostsHash(), MergedHosts.hash(of: Data(systemHosts.utf8)))
+    }
+
     func testReopeningDoesNotReimportOrOverwriteOriginalBackup() throws {
         let workspace = Workspace(rootDirectory: rootDirectory)
         _ = try workspace.open(systemHosts: { "127.0.0.1 localhost" })

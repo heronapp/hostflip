@@ -4,7 +4,7 @@ hostflip reads SwitchHosts data directly — every generation of it (v3, v4 and 
 
 ## Before you start
 
-1. **Turn off every SwitchHosts rule, or quit SwitchHosts.** On first launch hostflip takes a snapshot of the current `/etc/hosts` as your read-only *Base Hosts* — the baseline it always applies first and never loses. If SwitchHosts rules are active at that moment, their lines become part of that baseline. Clean first, then launch.
+1. **Quit SwitchHosts.** On first launch hostflip takes a snapshot of the current `/etc/hosts` as your read-only *Base Hosts* — the baseline it always applies first and never loses. hostflip recognises the block SwitchHosts appends below its `# --- SWITCHHOSTS_CONTENT_START ---` marker and keeps it out of that baseline, so rules that happen to be on do not get welded in — you can leave them as they are. The rules below the marker are not kept either; if you want them, import them from your SwitchHosts data. Quitting SwitchHosts simply avoids two tools writing the same file, which would trip hostflip's drift review on every save.
 2. **Keep your SwitchHosts data where it is.** hostflip only reads it; nothing is moved or deleted. `~/.SwitchHosts` keeps working as a backup for as long as you want it.
 
 ## Import
@@ -52,6 +52,10 @@ hostflip is Mac-only (macOS 14+, Apple silicon). There is no Windows or Linux bu
 1. Activate profiles from the menu bar and confirm the switch with `hostflip doctor your.host.name`.
 2. Quit SwitchHosts for good, or at least leave all its rules off. Two tools writing `/etc/hosts` will trip hostflip's drift review every time the other one saves.
 3. If your browser still resolves the old address, that is the browser's own DNS and connection cache — see the README FAQ for the per-browser fix.
+
+## If your Base Hosts already contains SwitchHosts rules
+
+Workspaces captured by hostflip 0.3.0 or earlier took the whole file, SwitchHosts block included. To clean that up: remove the `# --- SWITCHHOSTS_CONTENT_START ---` line and everything below it from `/etc/hosts` by hand (with SwitchHosts quit), wait for hostflip to report the drift, and accept the reviewed file as your new Base Hosts in the drift review. The original file stays untouched as `hosts.orig`.
 
 ## If the SwitchHosts v5 upgrade lost your data
 
