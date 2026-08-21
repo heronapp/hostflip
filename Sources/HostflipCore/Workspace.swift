@@ -252,6 +252,17 @@ public struct Workspace: Sendable {
         return MergedHosts.hash(of: try Data(contentsOf: originalBackupURL))
     }
 
+    /// The content counterpart of `expectedSystemHostsHash()` for the window before the first
+    /// confirmed merge write: the pristine first-capture backup, which is what the drift verdict
+    /// compares against while `lastWrittenHash` is nil. After a confirmed write it returns nil —
+    /// the expected content is then the caller's merged output. Kept branch-identical to
+    /// `expectedSystemHostsHash()` so a drift review never diffs against a different baseline
+    /// than the verdict that raised it (#82).
+    public func expectedSystemHostsContentBeforeFirstWrite() throws -> String? {
+        guard try requireManifest().lastWrittenHash == nil else { return nil }
+        return try String(contentsOf: originalBackupURL, encoding: .utf8)
+    }
+
     /// Records the hash after a successful merge write; only this field is updated, domain state is left untouched.
     public func recordLastWrittenHash(_ hash: String) throws {
         try withManifestLock {

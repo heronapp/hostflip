@@ -91,6 +91,11 @@ public actor MergeCoordinator {
                 if case .mergeWriteFailed(let failure) = error,
                    let writtenHash = failure.writtenHash {
                     await confirmedWriteTracker?.hostsWriteDidConfirm(writtenHash)
+                    // The replacement landed — persist it like a success, or a restart (and
+                    // the drift review, which reads the manifest, #82) would treat the write
+                    // as never having happened. Best effort: the error already describes the
+                    // real failure.
+                    try? workspace.recordLastWrittenHash(writtenHash)
                 }
                 throw error
             }

@@ -794,6 +794,87 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertEqual(coordinator.performedSwitches.count, 1)
     }
 
+    /// #82: before the first confirmed write, the drift review diffs against hosts.orig —
+    /// the same baseline as the verdict — not against the capture-stripped merged output.
+    @MainActor
+    func testPreFirstWriteDriftDiffsAgainstTheFullCaptureBackup() async throws {
+        let captured = "127.0.0.1 localhost\n\n# --- SWITCHHOSTS_CONTENT_START ---\n\n10.0.0.1 api.example.com\n"
+        try FileManager.default.removeItem(at: rootDirectory)
+        _ = try Workspace(rootDirectory: rootDirectory).open(systemHosts: { captured })
+        let systemHosts = SystemHostsDataSource(Data(captured.utf8))
+        let monitor = HostsDriftMonitoringStub()
+        let store = WorkspaceStore(
+            workspace: Workspace(rootDirectory: rootDirectory),
+            coordinator: SwitchCoordinatingStub(),
+            driftMonitor: monitor,
+            readSystemHosts: systemHosts.read,
+            fetchRemote: { _, _ in throw StubError() },
+            now: { Self.refreshClock }
+        )
+        store.loadIfNeeded()
+        XCTAssertEqual(store.baseHostsContent, "127.0.0.1 localhost\n")
+
+        systemHosts.replace(with: Data((captured + "1.2.3.4 external.local\n").utf8))
+        monitor.report(true)
+
+        let comparison = try XCTUnwrap(store.hostsDriftComparison)
+        XCTAssertEqual(comparison.driftAdditions, ["1.2.3.4 external.local"])
+
+        store.reconcileHosts(.addDriftLinesToBaseHosts)
+        await store.reconciliationTask?.value
+        XCTAssertEqual(
+            store.baseHostsContent,
+            "127.0.0.1 localhost\n1.2.3.4 external.local\n"
+        )
+    }
+
+    /// #82: an unreadable pre-write baseline yields no comparison at all — falling back to
+    /// the merged output would show the capture-stripped block as additions again.
+    @MainActor
+    func testAnUnreadableCaptureBackupFailsClosedWithNoComparison() throws {
+        let monitor = HostsDriftMonitoringStub()
+        let store = makeStore(coordinator: SwitchCoordinatingStub(), driftMonitor: monitor)
+        try FileManager.default.removeItem(at: rootDirectory.appendingPathComponent("hosts.orig"))
+
+        monitor.report(true)
+
+        XCTAssertTrue(store.hasHostsDrift)
+        XCTAssertNil(store.hostsDriftComparison)
+    }
+
+    /// #82: once a write is confirmed the expected side is the merged output, exactly as before.
+    @MainActor
+    func testPostWriteDriftStillDiffsAgainstTheMergedOutput() async throws {
+        let systemHosts = SystemHostsDataSource(Data(Self.importedHosts.utf8))
+        let monitor = HostsDriftMonitoringStub()
+        let coordinator = SwitchCoordinatingStub()
+        let store = WorkspaceStore(
+            workspace: Workspace(rootDirectory: rootDirectory),
+            coordinator: coordinator,
+            driftMonitor: monitor,
+            readSystemHosts: systemHosts.read,
+            fetchRemote: { _, _ in throw StubError() },
+            now: { Self.refreshClock }
+        )
+        store.loadIfNeeded()
+        let profileID = try XCTUnwrap(store.createStandaloneProfile())
+        store.updateProfileContent(profileID, content: "10.0.0.5 dev.local\n")
+        store.setProfileActive(profileID, true)
+        await store.switchTask?.value
+        // The coordinator stub bypasses the real MergeCoordinator, which records the
+        // written hash after the daemon confirms; record it here as production would.
+        try Workspace(rootDirectory: rootDirectory).recordLastWrittenHash("stub")
+
+        systemHosts.replace(with: Data("127.0.0.1 localhost\n9.9.9.9 rogue.local\n".utf8))
+        monitor.report(true)
+
+        let comparison = try XCTUnwrap(store.hostsDriftComparison)
+        // Expected side is the merged output: the active profile's line reads as removed
+        // from the actual file, the rogue line as added.
+        XCTAssertEqual(comparison.driftAdditions, ["9.9.9.9 rogue.local"])
+        XCTAssertTrue(comparison.readableDiff.contains("- 10.0.0.5 dev.local"))
+    }
+
     @MainActor
     func testUsingSystemHostsAsBaseAcceptsCurrentFileWithoutRewritingIt() throws {
         let actualHosts = Data("9.9.9.9 adopted.local\n".utf8)
@@ -2575,6 +2656,9 @@ final class WorkspaceStoreTests: XCTestCase {
         store.setProfileActive(localID, true)
         await store.switchTask?.value
         await store.followUpMergeTask?.value
+        // The coordinator stub bypasses the real MergeCoordinator's hash recording; record it
+        // so the drift review diffs against the merged output, as it does after a real write (#82).
+        try Workspace(rootDirectory: rootDirectory).recordLastWrittenHash("stub")
         let remoteID = try await createRemoteProfile(in: store, url: url)
         driftMonitor.report(true)
         let comparisonBefore = try XCTUnwrap(store.hostsDriftComparison)

@@ -137,7 +137,9 @@ final class MergeCoordinatorTests: XCTestCase {
 
         let confirmedTargetHashes = await tracker.confirmedTargetHashes
         XCTAssertEqual(confirmedTargetHashes, [merged.hash])
-        XCTAssertNil(try workspace.lastWrittenHash())
+        // The write is a fact: it must survive into the manifest, not just the in-memory
+        // tracker, or a restart (and the drift review, #82) would treat it as never made.
+        XCTAssertEqual(try workspace.lastWrittenHash(), merged.hash)
     }
 
     func testMergeUsesConfirmedBaselineAndReportsConfirmationBeforeManifestRecordFailure() async throws {

@@ -1484,10 +1484,22 @@ final class WorkspaceStore {
 
     private func refreshHostsDriftComparison() {
         guard let model else { return }
-        let refreshed = try? HostsDriftComparison(
-            expectedContent: model.mergedHosts.content,
-            actualData: readSystemHosts()
-        )
+        // Before the first confirmed write, the drift verdict compares against hosts.orig, so the
+        // review must diff against that same baseline: diffing against the merged output — whose
+        // Base Hosts left the SwitchHosts block out at capture (#81) — would show the block as
+        // additions and hand it back to "Add to Base Hosts" (#82). An unreadable baseline fails
+        // closed as no comparison, like the monitor's verdict — falling back to the merged output
+        // would resurrect exactly the weld-back this guards against.
+        let expectedContent: String?
+        do {
+            expectedContent = try workspace.expectedSystemHostsContentBeforeFirstWrite()
+                ?? model.mergedHosts.content
+        } catch {
+            expectedContent = nil
+        }
+        let refreshed = try? expectedContent.map {
+            try HostsDriftComparison(expectedContent: $0, actualData: readSystemHosts())
+        }
         guard refreshed != hostsDriftComparison else { return }
         hostsDriftComparison = refreshed
         hostsDriftGeneration &+= 1
