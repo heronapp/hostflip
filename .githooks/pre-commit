@@ -12,7 +12,7 @@ cd "$(git rev-parse --show-toplevel)"
 
 # Public-tree include list — keep in sync with docs/agents/public-sync.md;
 # changing one requires changing the other.
-PUBLIC_RE='^(Sources/|Tests/|Packaging/|scripts/|\.githooks/|\.github/|Package\.swift$|Package\.resolved$|LICENSE$|README\.md$|CONTEXT\.md$|\.gitignore$|docs/screenshots/|docs/[A-Za-z0-9-]*-verification\.md$)'
+PUBLIC_RE='^(Sources/|Tests/|Packaging/|scripts/|\.githooks/|\.github/|Package\.swift$|Package\.resolved$|LICENSE$|README\.md$|CONTEXT\.md$|\.gitignore$|docs/screenshots/|docs/[A-Za-z0-9-]*-verification\.md$|docs/migrating-from-switchhosts\.md$)'
 
 STAGED="$(git diff --cached --name-only)"
 PUB="$(echo "$STAGED" | grep -E "$PUBLIC_RE" || true)"

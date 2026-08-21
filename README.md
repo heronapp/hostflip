@@ -1,6 +1,6 @@
 # hostflip
 
-Native macOS hosts switcher. Flip between `/etc/hosts` profiles from your menu bar — no password prompt, no Electron, no fuss.
+Native macOS hosts switcher. Flip between `/etc/hosts` profiles from your menu bar — no password prompt, no web view, no fuss.
 
 **Free and open source (MIT).**
 
@@ -8,15 +8,15 @@ Native macOS hosts switcher. Flip between `/etc/hosts` profiles from your menu b
 
 ## Why hostflip
 
-Editing `/etc/hosts` by hand — or typing your password every time a hosts manager wants to save — gets old fast. hostflip is built around one idea: **switching should be zero-interruption**. You approve the privileged helper once; after that, every flip is a single click in the menu bar.
+Most hosts managers treat `/etc/hosts` as their own: every save rewrites the whole file, and whatever else touched it is gone. hostflip is built around one idea: **the hosts file is yours**. It keeps your baseline intact, writes only inside its own fenced block, shows you a diff when something else changed the file — and once you approve its helper, every flip is a single click in the menu bar.
 
-- **Native and lightweight.** Swift + SwiftUI menu bar app. No web runtime, no background bloat.
-- **Zero-interruption switching.** A one-time approval of an embedded `SMAppService` daemon replaces per-switch password prompts.
-- **A real activation model.** Profiles live in groups: at most one profile per group is active (mutually exclusive), while active profiles across groups and standalone profiles stack together into the final hosts file.
-- **Your baseline is protected.** On first run, your current `/etc/hosts` is imported as the read-only *Base Hosts* — always applied first, never lost, and the original file is kept as a permanent backup.
 - **External edits are respected, not clobbered.** If anything else modifies `/etc/hosts`, hostflip detects the drift and walks you through reconciling it in a diff view before it writes again.
+- **Your baseline is protected.** On first run, your current `/etc/hosts` is imported as the read-only *Base Hosts* — always applied first, never lost, and the original file is kept as a permanent backup.
+- **A real activation model.** Profiles live in groups: at most one profile per group is active (mutually exclusive), while active profiles across groups and standalone profiles stack together into the final hosts file.
+- **Zero-interruption switching.** A one-time approval of an embedded `SMAppService` daemon replaces per-switch password prompts.
+- **Native and lightweight.** Swift + SwiftUI menu bar app. No web runtime, no background bloat.
 - **Pause everything.** One master switch restores your baseline hosts while remembering every profile's state.
-- **Switching from SwitchHosts? One click.** hostflip detects SwitchHosts data in any of its three generations (v3/v4/v5) and imports the lot: folders become groups, remote rules become Remote Profiles that keep refreshing on their own, and everything arrives inactive with a full summary of what came in, what was skipped, and what was adjusted.
+- **Switching from SwitchHosts? One click.** hostflip detects SwitchHosts data in any of its three generations (v3/v4/v5) and imports the lot: folders become groups, remote rules become Remote Profiles that keep refreshing on their own, and everything arrives inactive with a full summary of what came in, what was skipped, and what was adjusted. The [migration guide](docs/migrating-from-switchhosts.md) covers what carries over, what works differently, and the order of operations.
 
 <p align="center">
   <img src="docs/screenshots/menu-bar.png" width="293" alt="Quick switching from the menu bar: standalone profiles on top, groups as submenus with each group's active profile shown as a badge">
@@ -115,7 +115,7 @@ Note that `/etc/hosts` keeps whatever hostflip last wrote — uninstalling does 
 
 ## About
 
-hostflip is made by the team behind [Heron](https://getheron.app/), a paid macOS app for debugging iPhone web traffic. hostflip is MIT-licensed and standalone — it has no dependency on Heron.
+hostflip is made by the developer of [Heron](https://getheron.app/), a paid macOS app for debugging iPhone web traffic. hostflip is MIT-licensed and standalone — it has no dependency on Heron.
 
 ## License
 
