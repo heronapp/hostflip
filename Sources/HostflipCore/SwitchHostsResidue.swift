@@ -12,17 +12,20 @@ public enum SwitchHostsResidue {
 
     /// The content with the SwitchHosts block removed: everything before the first line
     /// that is exactly the marker, trailing whitespace collapsed to a single newline (the
-    /// shape SwitchHosts itself writes when all rules are off), or the empty string when
-    /// the marker leads the file. Content without a marker line is returned unchanged —
-    /// the marker text inside a longer line (say, a user's comment about SwitchHosts) is
-    /// not SwitchHosts's writing and must not cut the file.
+    /// shape SwitchHosts itself writes when all rules are off; CRLF content keeps its own
+    /// ending). Content without a marker line is returned unchanged — the marker text
+    /// inside a longer line (say, a user's comment about SwitchHosts) is not SwitchHosts's
+    /// writing and must not cut the file. So is content with nothing but whitespace before
+    /// the marker: that is not the shape append mode produces, and an empty Base Hosts
+    /// would make hostflip write an empty system hosts whenever no profile is active —
+    /// keeping the whole file welds the block in (the pre-#81 behavior), which is the
+    /// safer failure.
     public static func stripped(from content: String) -> String {
         guard let markerLineStart = markerLineStart(in: content) else { return content }
-        var head = String(content[..<markerLineStart])
-        while let last = head.unicodeScalars.last, CharacterSet.whitespacesAndNewlines.contains(last) {
-            head.unicodeScalars.removeLast()
-        }
-        return head.isEmpty ? "" : head + "\n"
+        let head = content[..<markerLineStart]
+        guard let lastContent = head.lastIndex(where: { !$0.isWhitespace }) else { return content }
+        let newline = head.contains("\r\n") ? "\r\n" : "\n"
+        return head[...lastContent] + newline
     }
 
     /// The start of the first line whose whole content is the marker. `Character.isNewline`
