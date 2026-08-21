@@ -1,0 +1,6 @@
+<h2>What's New</h2>
+<ul>
+  <li><b>A cleaner first snapshot.</b> On first launch, hostflip now recognises content that belongs to another hosts manager — the block SwitchHosts appends below its marker, or a leftover block from a previous hostflip install — and keeps it out of your read-only Base Hosts. No need to turn SwitchHosts rules off before trying hostflip; the original file is still preserved in full as <code>hosts.orig</code>.</li>
+  <li><b>SwitchHosts v5 data-loss rescue.</b> Some v4 → v5 SwitchHosts upgrades lose the rule list. The import now looks into the archives v5 leaves behind and reads the newest one whose data survived — no folder picking needed. A step-by-step migration guide now ships in the repository: what carries over, what works differently, and the order that keeps your hosts file clean.</li>
+  <li><b>A truer drift review.</b> Before hostflip's first write, the drift review now compares against the exact snapshot taken at first launch, so an external edit shows only what actually changed.</li>
+</ul>
