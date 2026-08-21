@@ -8,6 +8,18 @@ final class SwitchHostsResidueTests: XCTestCase {
         XCTAssertEqual(SwitchHostsResidue.stripped(from: content), content)
     }
 
+    func testTheMarkerInsideALongerLineDoesNotCutTheFile() {
+        let comment = "# note: SwitchHosts appends below # --- SWITCHHOSTS_CONTENT_START ---\n10.0.0.1 corp.internal\n"
+        XCTAssertEqual(SwitchHostsResidue.stripped(from: comment), comment)
+        let indented = "  # --- SWITCHHOSTS_CONTENT_START ---\n10.0.0.1 corp.internal\n"
+        XCTAssertEqual(SwitchHostsResidue.stripped(from: indented), indented)
+    }
+
+    func testTrailingSpacesAndTabsBeforeTheMarkerCollapseToo() {
+        let content = "127.0.0.1 localhost\t \u{00A0}\n\n# --- SWITCHHOSTS_CONTENT_START ---\n10.0.0.1 api.example.com\n"
+        XCTAssertEqual(SwitchHostsResidue.stripped(from: content), "127.0.0.1 localhost\n")
+    }
+
     func testEverythingFromTheMarkerOnIsDroppedAndTrailingBlankLinesCollapse() {
         let content = "127.0.0.1 localhost\n255.255.255.255 broadcasthost\n\n\n# --- SWITCHHOSTS_CONTENT_START ---\n\n10.0.0.1 api.example.com\n"
         XCTAssertEqual(

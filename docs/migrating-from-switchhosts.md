@@ -55,7 +55,7 @@ hostflip is Mac-only (macOS 14+, Apple silicon). There is no Windows or Linux bu
 
 ## If your Base Hosts already contains SwitchHosts rules
 
-Workspaces captured by hostflip 0.3.0 or earlier took the whole file, SwitchHosts block included. To clean that up: remove the `# --- SWITCHHOSTS_CONTENT_START ---` line and everything below it from `/etc/hosts` by hand (with SwitchHosts quit), wait for hostflip to report the drift, and accept the reviewed file as your new Base Hosts in the drift review. The original file stays untouched as `hosts.orig`.
+Workspaces captured by hostflip 0.3.0 or earlier took the whole file, SwitchHosts block included. To clean that up: deactivate every profile (the option below requires it), remove the `# --- SWITCHHOSTS_CONTENT_START ---` line and everything below it from `/etc/hosts` by hand (with SwitchHosts quit), wait for hostflip to report the drift, and choose **Use System Hosts as Base** in the drift review. The original file stays untouched as `hosts.orig`.
 
 ## If the SwitchHosts v5 upgrade lost your data
 
