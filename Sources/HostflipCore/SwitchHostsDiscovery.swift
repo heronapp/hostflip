@@ -54,9 +54,10 @@ public enum SwitchHostsReader {
 }
 
 /// The data directory discovery chain (#75, ADR-0013): default `~/.SwitchHosts` → the v5
-/// custom-directory pointer → nil, which the UI answers with a manual folder picker.
+/// custom-directory pointer → the v4 archives v5 left behind (#80) → nil, which the UI
+/// answers with a manual folder picker.
 public enum SwitchHostsDiscovery {
-    /// The resolved data root of the first chain link that holds data, or nil when the
+    /// The resolved data root of the first chain link that holds rules, or nil when the
     /// chain is exhausted. v4's Electron userData pointer is deliberately not consulted
     /// (ADR-0013): rare, and the manual pick covers it.
     public static func discoverDataDirectory(
@@ -64,17 +65,42 @@ public enum SwitchHostsDiscovery {
         applicationSupportDirectory: URL? = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask).first
     ) -> URL? {
-        var candidates = [homeDirectory.appendingPathComponent(".SwitchHosts", isDirectory: true)]
+        let defaultDirectory = homeDirectory.appendingPathComponent(".SwitchHosts", isDirectory: true)
+        var candidates = [defaultDirectory]
         if let applicationSupportDirectory,
            let pointed = customDataDirectory(applicationSupportDirectory: applicationSupportDirectory) {
             candidates.append(pointed)
         }
+        candidates.append(contentsOf: v4Archives(under: defaultDirectory))
         for candidate in candidates {
-            if let (root, _) = SwitchHostsReader.resolveDataRoot(at: candidate) {
+            if let (root, _) = SwitchHostsReader.resolveDataRoot(at: candidate), holdsRules(root) {
                 return root
             }
         }
         return nil
+    }
+
+    /// Whether a store is worth offering. A live v5 store whose tree holds nothing but the
+    /// system entry is what a v4 → v5 upgrade that lost its data leaves behind (#80) — it
+    /// reads as empty so the chain moves on to the archive. A store that fails to read
+    /// still counts: the import then fails loudly and offers the manual pick, instead of
+    /// the corruption being skipped over in silence.
+    private static func holdsRules(_ root: URL) -> Bool {
+        guard let (data, _) = try? SwitchHostsReader.read(at: root) else { return true }
+        return data.items.contains { !$0.isSystem }
+    }
+
+    /// `v4/migration-<unix seconds>/` under the default directory: v5's first start moves
+    /// the v4 store it migrated from there (its `data/` lands as `data/list/tree.json`, so
+    /// the archive reads as a plain v4 root). Newest first; the stamps share a width, so
+    /// the lexical order is the numeric one.
+    private static func v4Archives(under directory: URL) -> [URL] {
+        let archiveRoot = directory.appendingPathComponent("v4", isDirectory: true)
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: archiveRoot.path)) ?? []
+        return names
+            .filter { $0.hasPrefix("migration-") }
+            .sorted(by: >)
+            .map { archiveRoot.appendingPathComponent($0, isDirectory: true) }
     }
 
     /// The directory the v5 pointer file names, or nil without a readable pointer. The

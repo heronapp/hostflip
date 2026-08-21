@@ -11,7 +11,7 @@ hostflip reads SwitchHosts data directly — every generation of it (v3, v4 and 
 
 hostflip notices SwitchHosts data on first launch and offers to import it. You can also run **File → Import from SwitchHosts…** at any time.
 
-hostflip looks in `~/.SwitchHosts`, then in the custom data directory a v5 install may point to. If neither holds data, it asks you to pick the folder yourself — either the data directory or its `SwitchHosts.data` subfolder works.
+hostflip looks in `~/.SwitchHosts`, then in the custom data directory a v5 install may point to, then in the v4 archives a v5 upgrade leaves under `~/.SwitchHosts/v4/`. If none of them holds rules, it asks you to pick the folder yourself — either the data directory or its `SwitchHosts.data` subfolder works.
 
 The import is all-or-nothing: either everything lands, or nothing changes.
 
@@ -55,4 +55,4 @@ hostflip is Mac-only (macOS 14+, Apple silicon). There is no Windows or Linux bu
 
 ## If the SwitchHosts v5 upgrade lost your data
 
-Some v4 → v5 upgrades have left users with an empty rule list. v5 moves the old data into `~/.SwitchHosts/v4/migration-<timestamp>/`. If that folder still contains `data/list/tree.json`, point hostflip's folder picker at the `migration-<timestamp>` folder and it will import the v4 data from there. If the folder is missing its `data` directory, the data did not survive the upgrade and hostflip cannot recover it either.
+Some v4 → v5 upgrades have left users with an empty rule list. v5 moves the old data into `~/.SwitchHosts/v4/migration-<timestamp>/`. When the live v5 store holds no rules, hostflip skips it and imports from the newest of those archives that still contains `data/list/tree.json` — no folder picking needed; the import summary names the format it read (v4). If the archive is missing its `data` directory, the data did not survive the upgrade and hostflip cannot recover it either.

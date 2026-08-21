@@ -281,6 +281,73 @@ final class SwitchHostsFormatsTests: XCTestCase {
         XCTAssertEqual(discovered, custom)
     }
 
+    func testDiscoveryFallsBackToTheNewestV4ArchiveWhenTheLiveStoreIsEmpty() throws {
+        let home = try makeTemporaryDirectory()
+        let defaultDirectory = home.appendingPathComponent(".SwitchHosts", isDirectory: true)
+        try FileManager.default.createDirectory(at: defaultDirectory, withIntermediateDirectories: true)
+        try write(Self.systemOnlyV5Manifest, to: defaultDirectory.appendingPathComponent("manifest.json"))
+        // The newest archive kept only config (the shape SwitchHosts #998 reported); the
+        // two older ones still hold a v4 tree.
+        let archives = defaultDirectory.appendingPathComponent("v4", isDirectory: true)
+        let configOnly = archives.appendingPathComponent("migration-1800000000/config/dict", isDirectory: true)
+        try FileManager.default.createDirectory(at: configOnly, withIntermediateDirectories: true)
+        try write("{}", to: configOnly.appendingPathComponent("cfg.json"))
+        let newer = archives.appendingPathComponent("migration-1700000000", isDirectory: true)
+        let older = archives.appendingPathComponent("migration-1600000000", isDirectory: true)
+        try writeV4Archive(at: newer)
+        try writeV4Archive(at: older)
+
+        let discovered = SwitchHostsDiscovery.discoverDataDirectory(
+            homeDirectory: home,
+            applicationSupportDirectory: try makeTemporaryDirectory()
+        )
+
+        XCTAssertEqual(discovered, newer)
+    }
+
+    func testDiscoveryPrefersALiveStoreWithRulesOverTheArchives() throws {
+        let home = try makeTemporaryDirectory()
+        let defaultDirectory = home.appendingPathComponent(".SwitchHosts", isDirectory: true)
+        try FileManager.default.createDirectory(at: defaultDirectory, withIntermediateDirectories: true)
+        try writeV5Fixture(at: defaultDirectory)
+        try writeV4Archive(at: defaultDirectory.appendingPathComponent("v4/migration-1700000000", isDirectory: true))
+
+        let discovered = SwitchHostsDiscovery.discoverDataDirectory(
+            homeDirectory: home,
+            applicationSupportDirectory: try makeTemporaryDirectory()
+        )
+
+        XCTAssertEqual(discovered, defaultDirectory)
+    }
+
+    func testDiscoveryStillHandsBackAnUnreadableLiveStore() throws {
+        let home = try makeTemporaryDirectory()
+        let defaultDirectory = home.appendingPathComponent(".SwitchHosts", isDirectory: true)
+        try FileManager.default.createDirectory(at: defaultDirectory, withIntermediateDirectories: true)
+        try write("not json", to: defaultDirectory.appendingPathComponent("manifest.json"))
+        try writeV4Archive(at: defaultDirectory.appendingPathComponent("v4/migration-1700000000", isDirectory: true))
+
+        let discovered = SwitchHostsDiscovery.discoverDataDirectory(
+            homeDirectory: home,
+            applicationSupportDirectory: try makeTemporaryDirectory()
+        )
+
+        // The corrupt store surfaces as an import failure with the manual pick, not as a silent skip.
+        XCTAssertEqual(discovered, defaultDirectory)
+    }
+
+    func testDiscoveryReturnsNilWhenEveryStoreIsEmpty() throws {
+        let home = try makeTemporaryDirectory()
+        let defaultDirectory = home.appendingPathComponent(".SwitchHosts", isDirectory: true)
+        try FileManager.default.createDirectory(at: defaultDirectory, withIntermediateDirectories: true)
+        try write(Self.systemOnlyV5Manifest, to: defaultDirectory.appendingPathComponent("manifest.json"))
+
+        XCTAssertNil(SwitchHostsDiscovery.discoverDataDirectory(
+            homeDirectory: home,
+            applicationSupportDirectory: try makeTemporaryDirectory()
+        ))
+    }
+
     func testDiscoveryReturnsNilWhenTheChainIsExhausted() throws {
         XCTAssertNil(SwitchHostsDiscovery.discoverDataDirectory(
             homeDirectory: try makeTemporaryDirectory(),
@@ -356,6 +423,27 @@ final class SwitchHostsFormatsTests: XCTestCase {
      "version": [3, 5, 8, 0]
     }
     """#
+
+    /// A v5 manifest holding nothing but the system entry: what a v4 → v5 upgrade that
+    /// lost its rules leaves in `~/.SwitchHosts`.
+    private static let systemOnlyV5Manifest = #"""
+    {
+     "format": "switchhosts-data",
+     "schemaVersion": 1,
+     "root": [{"id": "0", "title": "System Hosts", "isSys": true, "on": true}]
+    }
+    """#
+
+    /// The v4 store as v5's migration archives it: `data/list/tree.json` with one loose
+    /// rule; the hosts collection is absent, which the v4 reader accepts as "nothing stored".
+    private func writeV4Archive(at root: URL) throws {
+        let listDirectory = root.appendingPathComponent("data/list", isDirectory: true)
+        try FileManager.default.createDirectory(at: listDirectory, withIntermediateDirectories: true)
+        try write(
+            #"[{"id": "0", "title": "System Hosts", "is_sys": true, "on": true}, {"title": "dev", "id": "aaaa", "on": false}]"#,
+            to: listDirectory.appendingPathComponent("tree.json")
+        )
+    }
 
     private func write(_ text: String, to url: URL) throws {
         try Data(text.utf8).write(to: url)
