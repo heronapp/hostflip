@@ -73,9 +73,12 @@ public struct Workspace: Sendable {
         try FileManager.default.createDirectory(at: profilesDirectory, withIntermediateDirectories: true)
         try writeOriginalBackupIfAbsent(content)
 
-        // hosts.orig keeps the file as found; Base Hosts leaves out a SwitchHosts block (#81).
+        // hosts.orig keeps the file as found; Base Hosts leaves out manager-owned blocks —
+        // a previous install's own appended block (#83) and a SwitchHosts block (#81).
         let model = try ActivationModel(
-            baseHosts: BaseHosts(content: SwitchHostsResidue.stripped(from: content)),
+            baseHosts: BaseHosts(
+                content: SwitchHostsResidue.stripped(from: MergedHosts.removingAppendedBlock(from: content))
+            ),
             standaloneProfiles: [],
             groups: []
         )
@@ -250,6 +253,17 @@ public struct Workspace: Sendable {
             return lastWrittenHash
         }
         return MergedHosts.hash(of: try Data(contentsOf: originalBackupURL))
+    }
+
+    /// The content counterpart of `expectedSystemHostsHash()` for the window before the first
+    /// confirmed merge write: the pristine first-capture backup, which is what the drift verdict
+    /// compares against while `lastWrittenHash` is nil. After a confirmed write it returns nil —
+    /// the expected content is then the caller's merged output. Kept branch-identical to
+    /// `expectedSystemHostsHash()` so a drift review never diffs against a different baseline
+    /// than the verdict that raised it (#82).
+    public func expectedSystemHostsContentBeforeFirstWrite() throws -> String? {
+        guard try requireManifest().lastWrittenHash == nil else { return nil }
+        return try String(contentsOf: originalBackupURL, encoding: .utf8)
     }
 
     /// Records the hash after a successful merge write; only this field is updated, domain state is left untouched.

@@ -28,17 +28,8 @@ public enum SwitchHostsResidue {
         return head[...lastContent] + newline
     }
 
-    /// The start of the first line whose whole content is the marker. `Character.isNewline`
-    /// treats CRLF as one grapheme, so lines come out clean in CRLF files too.
+    /// The start of the first line whose whole content is the marker.
     private static func markerLineStart(in content: String) -> String.Index? {
-        var lineStart = content.startIndex
-        while lineStart < content.endIndex {
-            let lineEnd = content[lineStart...].firstIndex(where: \.isNewline) ?? content.endIndex
-            if content[lineStart..<lineEnd] == marker {
-                return lineStart
-            }
-            lineStart = lineEnd < content.endIndex ? content.index(after: lineEnd) : content.endIndex
-        }
-        return nil
+        MergedHosts.lineRange(ofExact: marker, in: content, from: content.startIndex)?.lowerBound
     }
 }
