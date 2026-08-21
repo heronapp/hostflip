@@ -53,9 +53,9 @@ public enum SwitchHostsReader {
     }
 }
 
-/// The data directory discovery chain (#75, ADR-0013): default `~/.SwitchHosts` → the v5
-/// custom-directory pointer → the v4 archives v5 left behind (#80) → nil, which the UI
-/// answers with a manual folder picker.
+/// The data directory discovery chain: default `~/.SwitchHosts` → the v5 custom-directory
+/// pointer (both #75, ADR-0013) → the v4 archives v5 left behind under either (#80) → nil,
+/// which the UI answers with a manual folder picker.
 public enum SwitchHostsDiscovery {
     /// The resolved data root of the first chain link that holds rules, or nil when the
     /// chain is exhausted. v4's Electron userData pointer is deliberately not consulted
@@ -65,13 +65,12 @@ public enum SwitchHostsDiscovery {
         applicationSupportDirectory: URL? = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask).first
     ) -> URL? {
-        let defaultDirectory = homeDirectory.appendingPathComponent(".SwitchHosts", isDirectory: true)
-        var candidates = [defaultDirectory]
+        var bases = [homeDirectory.appendingPathComponent(".SwitchHosts", isDirectory: true)]
         if let applicationSupportDirectory,
            let pointed = customDataDirectory(applicationSupportDirectory: applicationSupportDirectory) {
-            candidates.append(pointed)
+            bases.append(pointed)
         }
-        candidates.append(contentsOf: v4Archives(under: defaultDirectory))
+        let candidates = bases + bases.flatMap(v4Archives(under:))
         for candidate in candidates {
             if let (root, _) = SwitchHostsReader.resolveDataRoot(at: candidate), holdsRules(root) {
                 return root
@@ -81,26 +80,41 @@ public enum SwitchHostsDiscovery {
     }
 
     /// Whether a store is worth offering. A live v5 store whose tree holds nothing but the
-    /// system entry is what a v4 → v5 upgrade that lost its data leaves behind (#80) — it
-    /// reads as empty so the chain moves on to the archive. A store that fails to read
-    /// still counts: the import then fails loudly and offers the manual pick, instead of
-    /// the corruption being skipped over in silence.
+    /// system entry and empty folders is what a v4 → v5 upgrade that lost its data leaves
+    /// behind (#80) — it reads as empty so the chain moves on to the archive. The same
+    /// shape also follows a user emptying v5 by hand; the archive's rules then come back,
+    /// inactive and labeled v4 in the summary — an accepted trade for the rescue. A store
+    /// that fails to read still counts: the import then fails loudly and offers the manual
+    /// pick, instead of the corruption being skipped over in silence.
     private static func holdsRules(_ root: URL) -> Bool {
         guard let (data, _) = try? SwitchHostsReader.read(at: root) else { return true }
-        return data.items.contains { !$0.isSystem }
+        return containsRule(data.items)
     }
 
-    /// `v4/migration-<unix seconds>/` under the default directory: v5's first start moves
-    /// the v4 store it migrated from there (its `data/` lands as `data/list/tree.json`, so
-    /// the archive reads as a plain v4 root). Newest first; the stamps share a width, so
-    /// the lexical order is the numeric one.
+    private static func containsRule(_ items: [SwitchHostsItem]) -> Bool {
+        items.contains { item in
+            if case .folder(_, let children) = item.kind {
+                return containsRule(children)
+            }
+            return !item.isSystem
+        }
+    }
+
+    /// `v4/migration-<unix seconds>/` under a store's root: v5's first start moves the v4
+    /// store it migrated from there (its `data/` lands as `data/list/tree.json`, so the
+    /// archive reads as a plain v4 root). The root is the active one, so a custom location
+    /// is probed at both of its levels like the store itself. Newest first by the numeric
+    /// stamp; a name without one (v5 falls back to `migration-unknown`) sorts last.
     private static func v4Archives(under directory: URL) -> [URL] {
-        let archiveRoot = directory.appendingPathComponent("v4", isDirectory: true)
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: archiveRoot.path)) ?? []
-        return names
-            .filter { $0.hasPrefix("migration-") }
-            .sorted(by: >)
-            .map { archiveRoot.appendingPathComponent($0, isDirectory: true) }
+        [directory, directory.appendingPathComponent("SwitchHosts.data", isDirectory: true)].flatMap { base in
+            let archiveRoot = base.appendingPathComponent("v4", isDirectory: true)
+            let names = (try? FileManager.default.contentsOfDirectory(atPath: archiveRoot.path)) ?? []
+            return names
+                .filter { $0.hasPrefix("migration-") }
+                .map { (name: $0, stamp: Int($0.dropFirst("migration-".count)) ?? -1) }
+                .sorted { $0.stamp > $1.stamp }
+                .map { archiveRoot.appendingPathComponent($0.name, isDirectory: true) }
+        }
     }
 
     /// The directory the v5 pointer file names, or nil without a readable pointer. The

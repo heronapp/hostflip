@@ -287,15 +287,17 @@ final class SwitchHostsFormatsTests: XCTestCase {
         try FileManager.default.createDirectory(at: defaultDirectory, withIntermediateDirectories: true)
         try write(Self.systemOnlyV5Manifest, to: defaultDirectory.appendingPathComponent("manifest.json"))
         // The newest archive kept only config (the shape SwitchHosts #998 reported); the
-        // two older ones still hold a v4 tree.
+        // older ones still hold a v4 tree. Ordering is by the numeric stamp: a shorter
+        // stamp and an unstamped name both lose to 1700000000, whatever the string order.
         let archives = defaultDirectory.appendingPathComponent("v4", isDirectory: true)
         let configOnly = archives.appendingPathComponent("migration-1800000000/config/dict", isDirectory: true)
         try FileManager.default.createDirectory(at: configOnly, withIntermediateDirectories: true)
         try write("{}", to: configOnly.appendingPathComponent("cfg.json"))
         let newer = archives.appendingPathComponent("migration-1700000000", isDirectory: true)
-        let older = archives.appendingPathComponent("migration-1600000000", isDirectory: true)
         try writeV4Archive(at: newer)
-        try writeV4Archive(at: older)
+        for name in ["migration-1600000000", "migration-999999999", "migration-unknown"] {
+            try writeV4Archive(at: archives.appendingPathComponent(name, isDirectory: true))
+        }
 
         let discovered = SwitchHostsDiscovery.discoverDataDirectory(
             homeDirectory: home,
@@ -303,6 +305,75 @@ final class SwitchHostsFormatsTests: XCTestCase {
         )
 
         XCTAssertEqual(discovered, newer)
+    }
+
+    func testDiscoveryTreatsALiveStoreOfEmptyFoldersAsEmpty() throws {
+        let home = try makeTemporaryDirectory()
+        let defaultDirectory = home.appendingPathComponent(".SwitchHosts", isDirectory: true)
+        try FileManager.default.createDirectory(at: defaultDirectory, withIntermediateDirectories: true)
+        try write(
+            #"""
+            {"format": "switchhosts-data", "schemaVersion": 1, "root": [
+             {"id": "0", "title": "System Hosts", "isSys": true, "on": true},
+             {"id": "f1", "title": "empty", "type": "folder", "folder": {"mode": 1}, "children": [
+              {"id": "f2", "title": "still empty", "type": "folder", "children": []}
+             ]}
+            ]}
+            """#,
+            to: defaultDirectory.appendingPathComponent("manifest.json")
+        )
+        let archive = defaultDirectory.appendingPathComponent("v4/migration-1700000000", isDirectory: true)
+        try writeV4Archive(at: archive)
+
+        let discovered = SwitchHostsDiscovery.discoverDataDirectory(
+            homeDirectory: home,
+            applicationSupportDirectory: try makeTemporaryDirectory()
+        )
+
+        XCTAssertEqual(discovered, archive)
+    }
+
+    func testDiscoveryPrefersThePointerStoreOverTheArchives() throws {
+        let home = try makeTemporaryDirectory()
+        let defaultDirectory = home.appendingPathComponent(".SwitchHosts", isDirectory: true)
+        try FileManager.default.createDirectory(at: defaultDirectory, withIntermediateDirectories: true)
+        try write(Self.systemOnlyV5Manifest, to: defaultDirectory.appendingPathComponent("manifest.json"))
+        try writeV4Archive(at: defaultDirectory.appendingPathComponent("v4/migration-1700000000", isDirectory: true))
+        let applicationSupport = try makeTemporaryDirectory()
+        let custom = try makeTemporaryDirectory()
+        try writeV5Fixture(at: custom)
+        let pointerDirectory = applicationSupport.appendingPathComponent("net.oldj.switchhosts")
+        try FileManager.default.createDirectory(at: pointerDirectory, withIntermediateDirectories: true)
+        try write(#"{"dataDir": "\#(custom.path)"}"#, to: pointerDirectory.appendingPathComponent("data_dir.json"))
+
+        let discovered = SwitchHostsDiscovery.discoverDataDirectory(
+            homeDirectory: home,
+            applicationSupportDirectory: applicationSupport
+        )
+
+        XCTAssertEqual(discovered, custom)
+    }
+
+    func testDiscoveryScansTheArchivesOfAnEmptyPointerStoreToo() throws {
+        let home = try makeTemporaryDirectory()
+        let applicationSupport = try makeTemporaryDirectory()
+        let custom = try makeTemporaryDirectory()
+        let store = custom.appendingPathComponent("SwitchHosts.data", isDirectory: true)
+        try FileManager.default.createDirectory(at: store, withIntermediateDirectories: true)
+        try write(Self.systemOnlyV5Manifest, to: store.appendingPathComponent("manifest.json"))
+        // v5 archives under the active root, so a custom store's archive sits inside SwitchHosts.data/.
+        let archive = store.appendingPathComponent("v4/migration-1700000000", isDirectory: true)
+        try writeV4Archive(at: archive)
+        let pointerDirectory = applicationSupport.appendingPathComponent("net.oldj.switchhosts")
+        try FileManager.default.createDirectory(at: pointerDirectory, withIntermediateDirectories: true)
+        try write(#"{"dataDir": "\#(custom.path)"}"#, to: pointerDirectory.appendingPathComponent("data_dir.json"))
+
+        let discovered = SwitchHostsDiscovery.discoverDataDirectory(
+            homeDirectory: home,
+            applicationSupportDirectory: applicationSupport
+        )
+
+        XCTAssertEqual(discovered, archive)
     }
 
     func testDiscoveryPrefersALiveStoreWithRulesOverTheArchives() throws {
