@@ -44,7 +44,9 @@ enum HostflipMain {
     }
 
     /// The real switch path: open the default workspace, merge, and write the system hosts through the gate.
-    /// A first run imports Base Hosts from /etc/hosts (at which point the merged output matches the current system state).
+    /// A first run imports Base Hosts from /etc/hosts; the merged output then matches the current
+    /// system state, except that a SwitchHosts block in the file is left out of the capture (#81) —
+    /// on such a file this diagnostic write is the block's removal, not a no-op.
     private static func performSwitch() async {
         do {
             let workspace = Workspace(rootDirectory: Workspace.defaultRootDirectory)
