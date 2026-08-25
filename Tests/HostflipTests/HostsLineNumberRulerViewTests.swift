@@ -129,6 +129,8 @@ extension HostsLineNumberRulerViewTests {
         XCTAssertEqual(ruler.incompleteLines, [])
         textView.insertText("\nstray", replacementRange: NSRange(location: (textView.string as NSString).length, length: 0))
         XCTAssertEqual(ruler.incompleteLines, [4])
+        textView.insertText("# ", replacementRange: NSRange(location: (textView.string as NSString).length - 5, length: 0))
+        XCTAssertEqual(ruler.incompleteLines, [])
         textView.string = "fresh document"
         XCTAssertEqual(ruler.incompleteLines, [])
     }

@@ -282,12 +282,15 @@ final class HostsLineNumberRulerView: NSRulerView {
             )
         }
         lineStarts = starts
+        // Bridges the document once per character edit — the same order of work as the
+        // highlighting pass, and large Remote Profiles are read-only, so this runs on load only.
         incompleteLines = Set(HostsSyntax.incompleteLines(in: string as String))
 
         // Sized here, not in draw: changing the thickness re-tiles the scroll view, and doing
         // that mid-draw left the clip view scrolled sideways by the width difference.
+        // Digits right-aligned, plus a marker column on the left (#87).
         let digits = max(2, String(lineCount).count)
-        let desiredThickness = max(40, CGFloat(digits * 8 + 16))
+        let desiredThickness = max(40, CGFloat(digits * 7 + 24))
         if ruleThickness != desiredThickness {
             ruleThickness = desiredThickness
             if let clipView = scrollView?.contentView {
