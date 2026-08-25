@@ -17,8 +17,8 @@ struct HostsEditor: NSViewRepresentable {
     var documentID: AnyHashable = "single-document"
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = NSTextView.scrollableTextView()
-        let textView = scrollView.documentView as! NSTextView
+        let scrollView = HostsTextView.scrollableTextView()
+        let textView = scrollView.documentView as! HostsTextView
         textView.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
         textView.isEditable = isEditable
         textView.isSelectable = true
@@ -137,6 +137,74 @@ struct HostsEditor: NSViewRepresentable {
         case .ipAddress: .systemBlue
         case .hostname: .systemTeal
         }
+    }
+}
+
+/// Whether an editable hosts editor currently holds keyboard focus (#86). The text view
+/// publishes it here; the detail pane forwards it as a focused scene value, which is what
+/// the Edit-menu "Toggle Comment" item keys its enabled state on — a `Commands` body does
+/// not track `@Observable` reads, and a scene value also goes away with the key window.
+@Observable
+@MainActor
+final class HostsEditorFocus {
+    static let shared = HostsEditorFocus()
+    private(set) var isEditableEditorFocused = false
+
+    fileprivate func setEditableEditorFocused(_ focused: Bool) {
+        if isEditableEditorFocused != focused {
+            isEditableEditorFocused = focused
+        }
+    }
+}
+
+extension FocusedValues {
+    @Entry var isHostsEditorEditable: Bool?
+}
+
+/// The hosts editor's text view: carries the editor-level actions that the Edit menu
+/// dispatches down the responder chain (#86).
+final class HostsTextView: NSTextView {
+    override var isEditable: Bool {
+        didSet {
+            // Flipped from updateNSView on an in-place document switch; publish outside the
+            // SwiftUI update pass, and only if focus has not moved on in the meantime.
+            guard window?.firstResponder === self else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, window?.firstResponder === self else { return }
+                HostsEditorFocus.shared.setEditableEditorFocused(isEditable)
+            }
+        }
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted {
+            HostsEditorFocus.shared.setEditableEditorFocused(isEditable)
+        }
+        return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned {
+            HostsEditorFocus.shared.setEditableEditorFocused(false)
+        }
+        return resigned
+    }
+
+    /// Comments or uncomments the selected lines (the caret's line for an empty selection)
+    /// as one undoable edit that goes through the regular text-change path, so the profile
+    /// saves and merges exactly like a typed edit — including the held Remote Header
+    /// conversion (ADR-0012).
+    @objc func toggleComment(_ sender: Any?) {
+        guard isEditable,
+              let edit = HostsSyntax.toggleComment(in: string, range: selectedRange()),
+              shouldChangeText(in: edit.editedRange, replacementString: edit.replacement)
+        else { return }
+        textStorage?.replaceCharacters(in: edit.editedRange, with: edit.replacement)
+        didChangeText()
+        setSelectedRange(edit.selection)
+        scrollRangeToVisible(edit.selection)
     }
 }
 

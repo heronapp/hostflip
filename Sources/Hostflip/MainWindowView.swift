@@ -1026,6 +1026,8 @@ struct MainWindowView: View {
             isEditable: profile?.isRemote == false,
             documentID: profileID.map { AnyHashable($0) } ?? AnyHashable("base-hosts")
         )
+        // Read here, in a View body, so the focus change re-renders and reaches the Edit menu (#86).
+        .focusedSceneValue(\.isHostsEditorEditable, HostsEditorFocus.shared.isEditableEditorFocused)
     }
 }
 

@@ -293,3 +293,6 @@
 "Save" = "儲存";
 "The profile was changed outside this dialog." = "方案已在此對話框之外被更改。";
 "The profile is no longer a remote profile." = "此方案已不再是遠端方案。";
+
+/* Editor */
+"Toggle Comment" = "切換註解";
