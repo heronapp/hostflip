@@ -307,49 +307,37 @@ final class HostsLineNumberRulerView: NSRulerView {
         drawHashMarksAndLabels(in: bounds)
     }
 
-    override func drawHashMarksAndLabels(in rect: NSRect) {
+    /// One gutter label: a file line number and the text-view-space row it sits on.
+    struct Label: Equatable {
+        let line: Int
+        let y: CGFloat
+        let height: CGFloat
+    }
+
+    /// The labels for the rows intersecting `visibleRect` (text view coordinates), walking
+    /// only what the viewport controller has already laid out: asking for layout from here
+    /// (ensuresLayout / textLayoutFragment(for:)) cancels TextKit 2's idle estimation of the
+    /// document height, and the view then cannot scroll past the first screen. Returns nil
+    /// when nothing is laid out yet (first frame, or a document just swapped in).
+    func labels(in visibleRect: NSRect) -> [Label]? {
         guard let textView,
               let layoutManager = textView.textLayoutManager,
-              let contentManager = layoutManager.textContentManager
-        else { return }
-
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.alignment = .right
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular),
-            .foregroundColor: NSColor.tertiaryLabelColor,
-            .paragraphStyle: paragraphStyle,
-        ]
+              let contentManager = layoutManager.textContentManager,
+              let storage = textView.textStorage
+        else { return [] }
         let origin = textView.textContainerOrigin
-        let visibleRect = textView.visibleRect
-        let documentStart = contentManager.documentRange.location
 
-        // Row geometry is in text container coordinates; the ruler draws in its own.
-        func draw(_ number: Int, rowY: CGFloat, rowHeight: CGFloat) {
-            let point = convert(NSPoint(x: 0, y: rowY + origin.y), from: textView)
-            let labelRect = NSRect(x: 4, y: point.y, width: bounds.width - 10, height: rowHeight)
-            String(number).draw(in: labelRect, withAttributes: attributes)
-        }
-
-        guard let storage = textView.textStorage, storage.length > 0 else {
+        guard storage.length > 0 else {
             // An empty document has no fragments to walk, but still one line.
-            if let font = textView.font {
-                draw(1, rowY: 0, rowHeight: ceil(font.ascender - font.descender + font.leading))
-            }
-            return
+            guard let font = textView.font else { return [] }
+            return [Label(line: 1, y: origin.y, height: ceil(font.ascender - font.descender + font.leading))]
         }
-
-        // Walk only what the viewport controller has already laid out: asking for layout from
-        // here (ensuresLayout / textLayoutFragment(for:)) cancels TextKit 2's idle estimation
-        // of the document height, and the view then cannot scroll past the first screen.
         guard let viewport = layoutManager.textViewportLayoutController.viewportRange,
               viewport.location.compare(layoutManager.documentRange.endLocation) == .orderedAscending
-        else {
-            // Nothing laid out yet (first frame, or a document just swapped in): come back
-            // once the viewport has been laid out, since no bounds change may follow.
-            DispatchQueue.main.async { [weak self] in self?.needsDisplay = true }
-            return
-        }
+        else { return nil }
+
+        let documentStart = contentManager.documentRange.location
+        var labels: [Label] = []
         var lastFragment: NSTextLayoutFragment?
         layoutManager.enumerateTextLayoutFragments(from: viewport.location, options: []) { fragment in
             let frame = fragment.layoutFragmentFrame
@@ -360,7 +348,7 @@ final class HostsLineNumberRulerView: NSRulerView {
             let offset = contentManager.offset(from: documentStart, to: fragment.rangeInElement.location)
             // Only the first row of a wrapped line carries the number.
             let firstRowHeight = fragment.textLineFragments.first?.typographicBounds.height ?? frame.height
-            draw(lineNumber(at: offset), rowY: frame.minY, rowHeight: firstRowHeight)
+            labels.append(Label(line: lineNumber(at: offset), y: frame.minY + origin.y, height: firstRowHeight))
             lastFragment = fragment
             return true
         }
@@ -370,10 +358,32 @@ final class HostsLineNumberRulerView: NSRulerView {
         if let lastFragment, storage.mutableString.hasSuffix("\n"),
            contentManager.offset(from: documentStart, to: lastFragment.rangeInElement.endLocation) == storage.length,
            let emptyRow = lastFragment.textLineFragments.last?.typographicBounds {
-            let rowY = lastFragment.layoutFragmentFrame.minY + emptyRow.minY
-            if rowY + origin.y < visibleRect.maxY {
-                draw(lineCount, rowY: rowY, rowHeight: emptyRow.height)
+            let y = lastFragment.layoutFragmentFrame.minY + emptyRow.minY + origin.y
+            if y < visibleRect.maxY {
+                labels.append(Label(line: lineCount, y: y, height: emptyRow.height))
             }
+        }
+        return labels
+    }
+
+    override func drawHashMarksAndLabels(in rect: NSRect) {
+        guard let textView else { return }
+        guard let labels = labels(in: textView.visibleRect) else {
+            // Come back once the viewport has been laid out; no bounds change may follow.
+            DispatchQueue.main.async { [weak self] in self?.needsDisplay = true }
+            return
+        }
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .right
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular),
+            .foregroundColor: NSColor.tertiaryLabelColor,
+            .paragraphStyle: paragraphStyle,
+        ]
+        for label in labels {
+            let point = convert(NSPoint(x: 0, y: label.y), from: textView)
+            let labelRect = NSRect(x: 4, y: point.y, width: bounds.width - 10, height: label.height)
+            String(label.line).draw(in: labelRect, withAttributes: attributes)
         }
     }
 }

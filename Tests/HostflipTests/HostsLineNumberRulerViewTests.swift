@@ -80,3 +80,43 @@ extension HostsLineNumberRulerViewTests {
         XCTAssertEqual(ruler.lineNumber(at: 9), 4)
     }
 }
+
+extension HostsLineNumberRulerViewTests {
+    /// Lays the editor out in a window so the viewport controller has run.
+    private func makeLaidOutRuler(_ text: String, width: CGFloat) -> HostsLineNumberRulerView {
+        let (scrollView, textView, ruler) = makeRuler("")
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: width, height: 300),
+            styleMask: [.titled], backing: .buffered, defer: false
+        )
+        window.contentView = scrollView
+        scrollView.hasVerticalRuler = true
+        scrollView.rulersVisible = true
+        textView.string = text
+        window.contentView?.layoutSubtreeIfNeeded()
+        textView.display()
+        return ruler
+    }
+
+    func testLabelsNumberOnlyTheFirstRowOfAWrappedLine() throws {
+        let long = String(repeating: "x", count: 400)
+        let ruler = makeLaidOutRuler("a\n\(long)\nb", width: 300)
+        let labels = try XCTUnwrap(ruler.labels(in: NSRect(x: 0, y: 0, width: 300, height: 300)))
+        XCTAssertEqual(labels.map(\.line), [1, 2, 3])
+        // Line 3 sits below every wrapped row of line 2, more than one row further down.
+        XCTAssertGreaterThan(labels[2].y - labels[1].y, labels[1].height * 1.5)
+    }
+
+    func testLabelsIncludeTheTrailingEmptyLine() throws {
+        let ruler = makeLaidOutRuler("a\nb\n", width: 300)
+        let labels = try XCTUnwrap(ruler.labels(in: NSRect(x: 0, y: 0, width: 300, height: 300)))
+        XCTAssertEqual(labels.map(\.line), [1, 2, 3])
+        XCTAssertEqual(labels[2].y - labels[1].y, labels[1].height, accuracy: 0.5)
+    }
+
+    func testEmptyDocumentStillShowsLineOne() throws {
+        let ruler = makeLaidOutRuler("", width: 300)
+        let labels = try XCTUnwrap(ruler.labels(in: NSRect(x: 0, y: 0, width: 300, height: 300)))
+        XCTAssertEqual(labels.map(\.line), [1])
+    }
+}
