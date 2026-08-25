@@ -308,7 +308,5 @@
 /* Problem reporting */
 "Report an Issue…" = "問題を報告…";
 "Copy Diagnostic Report" = "診断レポートをコピー";
-"Copied" = "コピーしました";
 "Diagnostic report copied" = "診断レポートをコピーしました";
-"Paste it into the issue's Diagnostic report field." = "Issue の「Diagnostic report」欄に貼り付けてください。";
 "Support" = "サポート";

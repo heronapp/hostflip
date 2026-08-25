@@ -69,4 +69,15 @@ final class DiagnosticReportTests: XCTestCase {
         XCTAssertTrue(DiagnosticReport.text(for: unknown).contains("Helper: unknown"))
         XCTAssertTrue(DiagnosticReport.text(for: unknown).contains("Install source: direct download"))
     }
+
+    func testInstallSourceNeedsBothTheApplicationsFolderAndACaskroomEntry() throws {
+        let caskroom = FileManager.default.temporaryDirectory.appendingPathComponent("Caskroom-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: caskroom, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: caskroom) }
+        let inApplications = URL(fileURLWithPath: "/Applications/Hostflip.app")
+        XCTAssertEqual(DiagnosticSnapshot.installSource(bundleURL: inApplications, caskrooms: [caskroom.path]), .homebrewCask)
+        XCTAssertEqual(DiagnosticSnapshot.installSource(bundleURL: inApplications, caskrooms: ["/nonexistent/Caskroom"]), .direct)
+        let elsewhere = URL(fileURLWithPath: "/Users/someone/Downloads/Hostflip.app")
+        XCTAssertEqual(DiagnosticSnapshot.installSource(bundleURL: elsewhere, caskrooms: [caskroom.path]), .direct)
+    }
 }

@@ -193,7 +193,7 @@ private struct UpdatesSettingsView: View {
     let store: WorkspaceStore
     let maintenanceStore: MaintenanceStore
     @State private var automaticallyChecksForUpdates: Bool
-    @State private var reportCopiedAt: Date?
+    @State private var isShowingReportCopied = false
 
     init(updater: SPUUpdater, store: WorkspaceStore, maintenanceStore: MaintenanceStore) {
         self.updater = updater
@@ -222,23 +222,16 @@ private struct UpdatesSettingsView: View {
                     Button("Report an Issue…") {
                         ProblemReporting.openNewIssue(store: store, maintenanceStore: maintenanceStore)
                     }
-                    HStack(spacing: 8) {
-                        Button("Copy Diagnostic Report") {
-                            ProblemReporting.copyReport(store: store, maintenanceStore: maintenanceStore)
-                            reportCopiedAt = .now
-                        }
-                        if reportCopiedAt != nil {
-                            Text("Copied")
-                                .foregroundStyle(.secondary)
-                                .transition(.opacity)
+                    Button(isShowingReportCopied ? "Copied" : "Copy Diagnostic Report") {
+                        ProblemReporting.copyReport(store: store, maintenanceStore: maintenanceStore)
+                        isShowingReportCopied = true
+                        Task {
+                            try? await Task.sleep(for: .seconds(1.5))
+                            isShowingReportCopied = false
                         }
                     }
+                    .disabled(isShowingReportCopied)
                 }
-            }
-            .task(id: reportCopiedAt) {
-                guard reportCopiedAt != nil else { return }
-                try? await Task.sleep(for: .seconds(2))
-                reportCopiedAt = nil
             }
         }
         .padding(20)

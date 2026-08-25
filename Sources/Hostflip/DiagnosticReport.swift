@@ -13,6 +13,8 @@ struct DiagnosticSnapshot: Equatable {
     struct RemoteFreshness: Equatable {
         /// Seconds since the last successful refresh; nil when it never succeeded.
         var lastSuccessAge: TimeInterval?
+        /// The workspace only records that the latest attempt failed, not why (the reason is
+        /// shown live, never persisted), and the report must not add persisted data.
         var lastAttemptFailed: Bool
     }
 
@@ -71,10 +73,11 @@ enum DiagnosticReport {
             URLQueryItem(name: "template", value: bugTemplate),
             URLQueryItem(name: "environment", value: environment(for: snapshot)),
         ]
-        // URLComponents leaves "+" and newlines' neighbours alone; GitHub reads a fully
-        // percent-encoded query, so encode everything outside the unreserved set.
+        // URLComponents keeps "+", "&", and "=" literal inside values; encode everything
+        // outside the unreserved set so the multi-line block survives GitHub's query parsing.
         components.percentEncodedQuery = components.queryItems!.map { item in
-            "\(item.name)=\(item.value!.addingPercentEncoding(withAllowedCharacters: .urlQueryValueAllowed)!)"
+            let value = item.value ?? ""
+            return "\(item.name)=\(value.addingPercentEncoding(withAllowedCharacters: .urlQueryValueAllowed) ?? "")"
         }.joined(separator: "&")
         return components.url!
     }

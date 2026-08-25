@@ -308,7 +308,5 @@
 /* Problem reporting */
 "Report an Issue…" = "报告问题…";
 "Copy Diagnostic Report" = "拷贝诊断报告";
-"Copied" = "已拷贝";
 "Diagnostic report copied" = "诊断报告已拷贝";
-"Paste it into the issue's Diagnostic report field." = "请将其粘贴到 issue 的“Diagnostic report”栏中。";
 "Support" = "支持";

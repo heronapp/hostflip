@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import HostflipCore
+import HostflipXPC
 
 extension DiagnosticSnapshot {
     /// The live snapshot from state the app already holds — read-only, no workspace access,
@@ -11,7 +12,8 @@ extension DiagnosticSnapshot {
         let os = ProcessInfo.processInfo.operatingSystemVersion
         let profiles = store.standaloneProfiles + store.groups.flatMap(\.profiles)
         return DiagnosticSnapshot(
-            appVersion: info["CFBundleShortVersionString"] as? String ?? "unknown",
+            // A bare `swift run` binary has no Info.plist; the compiled-in version still applies.
+            appVersion: info["CFBundleShortVersionString"] as? String ?? HostflipBuild.version,
             build: info["CFBundleVersion"] as? String ?? "unknown",
             macOSVersion: "\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)",
             architecture: architecture,
@@ -41,10 +43,11 @@ extension DiagnosticSnapshot {
 
     /// Best effort: the cask installs into /Applications and leaves its Caskroom entry behind;
     /// anything else counts as a direct download.
+    static let caskrooms = ["/opt/homebrew/Caskroom/hostflip", "/usr/local/Caskroom/hostflip"]
+
     static func installSource(
-        bundleURL: URL, fileManager: FileManager = .default
+        bundleURL: URL, caskrooms: [String] = caskrooms, fileManager: FileManager = .default
     ) -> InstallSource {
-        let caskrooms = ["/opt/homebrew/Caskroom/hostflip", "/usr/local/Caskroom/hostflip"]
         let inApplications = bundleURL.deletingLastPathComponent().path == "/Applications"
         if inApplications, caskrooms.contains(where: { fileManager.fileExists(atPath: $0) }) {
             return .homebrewCask
