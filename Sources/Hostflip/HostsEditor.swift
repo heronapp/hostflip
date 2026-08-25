@@ -226,7 +226,7 @@ final class HostsLineNumberRulerView: NSRulerView {
         super.init(scrollView: scrollView, orientation: .verticalRuler)
         clientView = textView
         ruleThickness = 40
-        recountLines()
+        rebuildLineStarts()
 
         let center = NotificationCenter.default
         center.addObserver(
@@ -250,7 +250,7 @@ final class HostsLineNumberRulerView: NSRulerView {
     @objc private func storageDidProcessEditing(_ notification: Notification) {
         guard let storage = notification.object as? NSTextStorage,
               storage.editedMask.contains(.editedCharacters) else { return } // highlighting only
-        recountLines()
+        rebuildLineStarts()
         needsDisplay = true
     }
 
@@ -259,7 +259,7 @@ final class HostsLineNumberRulerView: NSRulerView {
     }
 
     /// Finds newlines on the storage's mutable string proxy — UTF-16 search, no String bridge.
-    private func recountLines() {
+    private func rebuildLineStarts() {
         guard let storage = textView?.textStorage else { return }
         let string = storage.mutableString
         var starts = [0]
@@ -274,6 +274,17 @@ final class HostsLineNumberRulerView: NSRulerView {
             )
         }
         lineStarts = starts
+
+        // Sized here, not in draw: changing the thickness re-tiles the scroll view, and doing
+        // that mid-draw left the clip view scrolled sideways by the width difference.
+        let digits = max(2, String(lineCount).count)
+        let desiredThickness = max(40, CGFloat(digits * 8 + 16))
+        if ruleThickness != desiredThickness {
+            ruleThickness = desiredThickness
+            if let clipView = scrollView?.contentView {
+                clipView.scroll(to: NSPoint(x: 0, y: clipView.bounds.origin.y))
+            }
+        }
     }
 
     /// 1-based number of the file line containing the UTF-16 offset.
@@ -302,12 +313,6 @@ final class HostsLineNumberRulerView: NSRulerView {
               let contentManager = layoutManager.textContentManager
         else { return }
 
-        let digits = max(2, String(lineCount).count)
-        let desiredThickness = max(40, CGFloat(digits * 8 + 16))
-        if ruleThickness != desiredThickness {
-            ruleThickness = desiredThickness
-        }
-
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.alignment = .right
         let attributes: [NSAttributedString.Key: Any] = [
@@ -319,17 +324,32 @@ final class HostsLineNumberRulerView: NSRulerView {
         let visibleRect = textView.visibleRect
         let documentStart = contentManager.documentRange.location
 
-        // Fragment frames are in text container coordinates; the ruler draws in its own.
-        func draw(_ number: Int, rowFrame: NSRect) {
-            let point = convert(NSPoint(x: 0, y: rowFrame.minY + origin.y), from: textView)
-            let labelRect = NSRect(x: 4, y: point.y, width: bounds.width - 10, height: rowFrame.height)
+        // Row geometry is in text container coordinates; the ruler draws in its own.
+        func draw(_ number: Int, rowY: CGFloat, rowHeight: CGFloat) {
+            let point = convert(NSPoint(x: 0, y: rowY + origin.y), from: textView)
+            let labelRect = NSRect(x: 4, y: point.y, width: bounds.width - 10, height: rowHeight)
             String(number).draw(in: labelRect, withAttributes: attributes)
+        }
+
+        guard let storage = textView.textStorage, storage.length > 0 else {
+            // An empty document has no fragments to walk, but still one line.
+            if let font = textView.font {
+                draw(1, rowY: 0, rowHeight: ceil(font.ascender - font.descender + font.leading))
+            }
+            return
         }
 
         // Walk only what the viewport controller has already laid out: asking for layout from
         // here (ensuresLayout / textLayoutFragment(for:)) cancels TextKit 2's idle estimation
         // of the document height, and the view then cannot scroll past the first screen.
-        guard let viewport = layoutManager.textViewportLayoutController.viewportRange else { return }
+        guard let viewport = layoutManager.textViewportLayoutController.viewportRange,
+              viewport.location.compare(layoutManager.documentRange.endLocation) == .orderedAscending
+        else {
+            // Nothing laid out yet (first frame, or a document just swapped in): come back
+            // once the viewport has been laid out, since no bounds change may follow.
+            DispatchQueue.main.async { [weak self] in self?.needsDisplay = true }
+            return
+        }
         var lastFragment: NSTextLayoutFragment?
         layoutManager.enumerateTextLayoutFragments(from: viewport.location, options: []) { fragment in
             let frame = fragment.layoutFragmentFrame
@@ -339,22 +359,20 @@ final class HostsLineNumberRulerView: NSRulerView {
             guard frame.maxY + origin.y > visibleRect.minY else { return true }
             let offset = contentManager.offset(from: documentStart, to: fragment.rangeInElement.location)
             // Only the first row of a wrapped line carries the number.
-            let firstRow = fragment.textLineFragments.first?.typographicBounds
-                ?? NSRect(origin: .zero, size: frame.size)
-            draw(lineNumber(at: offset), rowFrame: NSRect(x: 0, y: frame.minY, width: 0, height: firstRow.height))
+            let firstRowHeight = fragment.textLineFragments.first?.typographicBounds.height ?? frame.height
+            draw(lineNumber(at: offset), rowY: frame.minY, rowHeight: firstRowHeight)
             lastFragment = fragment
             return true
         }
 
         // A trailing newline opens an empty last line; TextKit 2 renders it as an extra line
         // fragment inside the last layout fragment rather than as a fragment of its own.
-        if let lastFragment, let storage = textView.textStorage,
-           storage.length > 0, storage.mutableString.hasSuffix("\n"),
+        if let lastFragment, storage.mutableString.hasSuffix("\n"),
            contentManager.offset(from: documentStart, to: lastFragment.rangeInElement.endLocation) == storage.length,
            let emptyRow = lastFragment.textLineFragments.last?.typographicBounds {
-            let frame = lastFragment.layoutFragmentFrame
-            if frame.minY + emptyRow.minY + origin.y < visibleRect.maxY {
-                draw(lineCount, rowFrame: NSRect(x: 0, y: frame.minY + emptyRow.minY, width: 0, height: emptyRow.height))
+            let rowY = lastFragment.layoutFragmentFrame.minY + emptyRow.minY
+            if rowY + origin.y < visibleRect.maxY {
+                draw(lineCount, rowY: rowY, rowHeight: emptyRow.height)
             }
         }
     }
