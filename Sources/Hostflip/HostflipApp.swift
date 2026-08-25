@@ -45,6 +45,9 @@ struct HostflipApp: App {
             remoteRefreshScheduler?.resync()
         }
         remoteRefreshScheduler.resync()
+        maintenanceStore.helperStatusChanged = { [weak store] status in
+            store?.helperStatusDidChange(status)
+        }
         self.store = store
         self.remoteRefreshScheduler = remoteRefreshScheduler
         self.maintenanceStore = maintenanceStore

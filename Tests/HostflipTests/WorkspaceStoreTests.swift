@@ -1335,6 +1335,166 @@ final class WorkspaceStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testHelperBecomingEnabledRetiresApprovalFeedback() async throws {
+        let stub = SwitchCoordinatingStub()
+        stub.switchOutcome = .success(.blocked(.needsApproval))
+        let store = makeStore(coordinator: stub)
+        let profileID = try XCTUnwrap(store.createStandaloneProfile())
+        store.setProfileActive(profileID, true)
+        await store.switchTask?.value
+        XCTAssertEqual(store.switchFeedback, .needsApproval)
+
+        store.helperStatusDidChange(.requiresApproval)
+        XCTAssertEqual(store.switchFeedback, .needsApproval)
+
+        store.helperStatusDidChange(.enabled)
+        XCTAssertNil(store.switchFeedback)
+    }
+
+    @MainActor
+    func testHelperBecomingEnabledRetiresUnavailableFeedback() async throws {
+        let stub = SwitchCoordinatingStub()
+        stub.switchOutcome = .success(.blocked(.unavailable))
+        let store = makeStore(coordinator: stub)
+        let profileID = try XCTUnwrap(store.createStandaloneProfile())
+        store.setProfileActive(profileID, true)
+        await store.switchTask?.value
+        XCTAssertEqual(store.switchFeedback, .unavailable)
+
+        store.helperStatusDidChange(.enabled)
+        XCTAssertNil(store.switchFeedback)
+    }
+
+    @MainActor
+    func testHelperStatusNeverRetiresOtherFeedback() async throws {
+        let stub = SwitchCoordinatingStub()
+        stub.switchOutcome = .failure(StubError())
+        let store = makeStore(coordinator: stub)
+        let profileID = try XCTUnwrap(store.createStandaloneProfile())
+        store.setProfileActive(profileID, true)
+        await store.switchTask?.value
+        guard case .failed = store.switchFeedback else {
+            return XCTFail("expected failure feedback, got: \(String(describing: store.switchFeedback))")
+        }
+
+        for status in [DaemonRegistrationStatus.enabled, .notRegistered, .notFound, .requiresApproval] {
+            store.helperStatusDidChange(status)
+        }
+        guard case .failed = store.switchFeedback else {
+            return XCTFail("failure feedback must survive helper status changes")
+        }
+    }
+
+    @MainActor
+    func testApprovalFeedbackHoldsOnlyWhileApprovalIsStillRequired() async throws {
+        for status in [DaemonRegistrationStatus.enabled, .notRegistered, .notFound] {
+            let stub = SwitchCoordinatingStub()
+            stub.switchOutcome = .success(.blocked(.needsApproval))
+            let store = makeStore(coordinator: stub)
+            let profileID = try XCTUnwrap(store.createStandaloneProfile())
+            store.setProfileActive(profileID, true)
+            await store.switchTask?.value
+
+            store.helperStatusDidChange(.requiresApproval)
+            XCTAssertEqual(store.switchFeedback, .needsApproval)
+            // Helper removed after the verdict: guiding the user to approve it would be nonsense.
+            store.helperStatusDidChange(status)
+            XCTAssertNil(store.switchFeedback, "status: \(status)")
+        }
+    }
+
+    @MainActor
+    func testUnavailableFeedbackHoldsUntilTheHelperIsEnabled() async throws {
+        let stub = SwitchCoordinatingStub()
+        stub.switchOutcome = .success(.blocked(.unavailable))
+        let store = makeStore(coordinator: stub)
+        let profileID = try XCTUnwrap(store.createStandaloneProfile())
+        store.setProfileActive(profileID, true)
+        await store.switchTask?.value
+
+        for status in [DaemonRegistrationStatus.notFound, .notRegistered, .requiresApproval] {
+            store.helperStatusDidChange(status)
+            XCTAssertEqual(store.switchFeedback, .unavailable, "status: \(status)")
+        }
+    }
+
+    @MainActor
+    func testRepeatedEnabledStatusRetiresApprovalFeedbackFromAnUnobservedRevocation() async throws {
+        let stub = SwitchCoordinatingStub()
+        let store = makeStore(coordinator: stub)
+        let profileID = try XCTUnwrap(store.createStandaloneProfile())
+        store.helperStatusDidChange(.enabled)
+
+        // Approval revoked and the switch made from the menu bar with the window closed: no
+        // status read ever sees requiresApproval.
+        stub.switchOutcome = .success(.blocked(.needsApproval))
+        store.setProfileActive(profileID, true)
+        await store.switchTask?.value
+        XCTAssertEqual(store.switchFeedback, .needsApproval)
+
+        // Re-approved, window opened: the first read is .enabled again and must still retire.
+        store.helperStatusDidChange(.enabled)
+        XCTAssertNil(store.switchFeedback)
+    }
+
+    @MainActor
+    func testHelperBecomingEnabledRetiresMatchingReconciliationError() async throws {
+        let coordinator = SwitchCoordinatingStub()
+        coordinator.switchOutcome = .success(.blocked(.needsApproval))
+        let monitor = HostsDriftMonitoringStub()
+        let store = makeStore(coordinator: coordinator, driftMonitor: monitor)
+        monitor.report(true)
+
+        store.reconcileHosts(.addDriftLinesToBaseHosts)
+        await store.reconciliationTask?.value
+        XCTAssertEqual(store.switchFeedback, .needsApproval)
+        XCTAssertEqual(store.reconciliationError, SwitchFeedback.needsApproval.message)
+
+        store.helperStatusDidChange(.enabled)
+        XCTAssertNil(store.switchFeedback)
+        XCTAssertNil(store.reconciliationError)
+        XCTAssertTrue(store.hasHostsDrift, "retiring the helper verdict must not pretend the drift was reconciled")
+    }
+
+    @MainActor
+    func testHelperBecomingEnabledKeepsAnUnrelatedReconciliationError() async throws {
+        let actualHosts = "127.0.0.1 localhost\n"
+            + "1.2.3.4 external.local\n"
+        let failure = HostsWriteError(
+            stage: .flushDNS,
+            message: "refresh failed",
+            writtenHash: MergedHosts(content: actualHosts).hash
+        )
+        let coordinator = SwitchCoordinatingStub()
+        coordinator.switchOutcome = .success(.channelFailed(
+            .mergeWriteFailed(failure),
+            statusAfterError: .enabled
+        ))
+        let monitor = HostsDriftMonitoringStub()
+        let store = makeStore(
+            coordinator: coordinator,
+            driftMonitor: monitor,
+            systemHosts: Data(actualHosts.utf8)
+        )
+        monitor.report(true)
+        store.reconcileHosts(.addDriftLinesToBaseHosts)
+        await store.reconciliationTask?.value
+        let flushError = try XCTUnwrap(store.reconciliationError)
+        XCTAssertFalse(store.hasHostsDrift)
+
+        // A later switch is blocked on approval; retiring that verdict must not erase the flush error.
+        coordinator.switchOutcome = .success(.blocked(.needsApproval))
+        let profileID = try XCTUnwrap(store.createStandaloneProfile())
+        store.setProfileActive(profileID, true)
+        await store.switchTask?.value
+        XCTAssertEqual(store.switchFeedback, .needsApproval)
+
+        store.helperStatusDidChange(.enabled)
+        XCTAssertNil(store.switchFeedback)
+        XCTAssertEqual(store.reconciliationError, flushError)
+    }
+
+    @MainActor
     func testDeleteActiveProfileGoesThroughSwitchAndPersists() async throws {
         let stub = SwitchCoordinatingStub()
         let store = makeStore(coordinator: stub)

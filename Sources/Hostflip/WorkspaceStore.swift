@@ -1269,6 +1269,30 @@ final class WorkspaceStore {
         switchFeedback = nil
     }
 
+    /// Retires feedback that only described the helper not being ready, and that neither the
+    /// switch nor the reconciliation path has any other way to notice is over. Every read is
+    /// forwarded, repeats included: a switch made from the menu bar with the window closed can
+    /// observe a revocation that no status read ever did, so a later `.enabled` is fresh news
+    /// even when it matches the previous read. Every other feedback kind stays.
+    func helperStatusDidChange(_ status: DaemonRegistrationStatus) {
+        let retire: Bool = switch switchFeedback {
+        // "Needs approval" holds only while the system still says so; enabled, not registered,
+        // and not found (helper removed) all make the approval guidance meaningless.
+        case .needsApproval: status != .requiresApproval
+        // "Unavailable" (app outside Applications) is over only once the helper registered.
+        case .unavailable: status == .enabled
+        default: false
+        }
+        guard retire, let feedback = switchFeedback else { return }
+        // The reconciliation path records the verdict a second time, as its error copy, using the
+        // feedback's own message; matching on it retires exactly that record and leaves an
+        // unrelated reconciliation error (a DNS flush failure kept after the drift resolved) alone.
+        if reconciliationError == feedback.message {
+            reconciliationError = nil
+        }
+        switchFeedback = nil
+    }
+
     func clearBackgroundSyncError() {
         backgroundSyncError = nil
     }
