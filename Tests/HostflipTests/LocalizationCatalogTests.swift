@@ -70,6 +70,11 @@ final class LocalizationCatalogTests: XCTestCase {
                     value.contains("%lld"), expectsCounter,
                     "\(language): \(key) placeholder mismatch"
                 )
+                // The copy suffix wraps the original name; dropping %@ would swallow it.
+                XCTAssertEqual(
+                    value.contains("%@"), key == "PROFILE_COPY_NAME",
+                    "\(language): \(key) name placeholder mismatch"
+                )
             }
         }
     }
