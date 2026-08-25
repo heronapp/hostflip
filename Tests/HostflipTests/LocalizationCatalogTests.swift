@@ -7,10 +7,9 @@ import XCTest
 /// row in each catalog. SwiftUI literal keys are covered by release visual QA.
 final class LocalizationCatalogTests: XCTestCase {
     private static let languages = ["zh-Hans", "zh-Hant", "ja"]
+    /// Group default names only: profile names double as file names and are not localized.
     private static let semanticKeys: Set<String> = [
-        "PROFILE_DEFAULT_NAME", "PROFILE_DEFAULT_NAME_NUMBERED",
         "GROUP_DEFAULT_NAME", "GROUP_DEFAULT_NAME_NUMBERED",
-        "PROFILE_COPY_NAME",
     ]
 
     private static var repoRoot: URL {
@@ -69,11 +68,6 @@ final class LocalizationCatalogTests: XCTestCase {
                 XCTAssertEqual(
                     value.contains("%lld"), expectsCounter,
                     "\(language): \(key) placeholder mismatch"
-                )
-                // The copy suffix wraps the original name; dropping %@ would swallow it.
-                XCTAssertEqual(
-                    value.contains("%@"), key == "PROFILE_COPY_NAME",
-                    "\(language): \(key) name placeholder mismatch"
                 )
             }
         }

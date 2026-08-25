@@ -380,9 +380,8 @@ final class WorkspaceStore {
             guard let latest = model.profile(profileID) else {
                 throw ActivationModelError.unknownProfile(profileID)
             }
-            // Semantic key: the suffix is a name fragment, not a command, and each language
-            // places it differently (see PROFILE_DEFAULT_NAME).
-            let name = String(localized: "PROFILE_COPY_NAME", defaultValue: "\(latest.name) Copy")
+            // Not localized: like the default name, this becomes a file name on disk.
+            let name = "\(latest.name) Copy"
             try model.duplicateProfile(profileID, as: copyID, name: name)
         }
         return profile(copyID) == nil ? nil : copyID
@@ -454,14 +453,12 @@ final class WorkspaceStore {
     private func defaultProfileName() -> String {
         let existing = Set((model?.standaloneProfiles ?? []).map(\.name)
             + (model?.groups ?? []).flatMap { $0.profiles.map(\.name) })
-        // Semantic keys: the literal "New Profile" is already the menu command's
-        // key, and a command phrasing makes a poor default name in translation.
-        var candidate = String(localized: "PROFILE_DEFAULT_NAME", defaultValue: "New Profile")
+        // Not localized: the profile name doubles as its file name in the workspace, so
+        // generated names stay ASCII across languages (group names are display-only).
+        var candidate = "New Profile"
         var counter = 2
         while existing.contains(candidate) {
-            candidate = String(
-                localized: "PROFILE_DEFAULT_NAME_NUMBERED", defaultValue: "New Profile \(counter)"
-            )
+            candidate = "New Profile \(counter)"
             counter += 1
         }
         return candidate

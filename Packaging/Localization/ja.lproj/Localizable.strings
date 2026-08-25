@@ -54,11 +54,8 @@
 "New" = "新規";
 "New Profile" = "新規プロファイル";
 "New Group" = "新規グループ";
-"PROFILE_DEFAULT_NAME" = "新規プロファイル";
-"PROFILE_DEFAULT_NAME_NUMBERED" = "新規プロファイル %lld";
 "GROUP_DEFAULT_NAME" = "新規グループ";
 "GROUP_DEFAULT_NAME_NUMBERED" = "新規グループ %lld";
-"PROFILE_COPY_NAME" = "%@ のコピー";
 "Group Name" = "グループ名";
 "Rename Group…" = "グループの名前を変更…";
 "Move Up" = "上に移動";

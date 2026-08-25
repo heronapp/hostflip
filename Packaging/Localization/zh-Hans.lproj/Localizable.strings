@@ -54,11 +54,8 @@
 "New" = "新建";
 "New Profile" = "新建方案";
 "New Group" = "新建分组";
-"PROFILE_DEFAULT_NAME" = "新方案";
-"PROFILE_DEFAULT_NAME_NUMBERED" = "新方案 %lld";
 "GROUP_DEFAULT_NAME" = "新分组";
 "GROUP_DEFAULT_NAME_NUMBERED" = "新分组 %lld";
-"PROFILE_COPY_NAME" = "%@ 副本";
 "Group Name" = "分组名称";
 "Rename Group…" = "重命名分组…";
 "Move Up" = "上移";
