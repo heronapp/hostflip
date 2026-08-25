@@ -73,10 +73,13 @@ struct HostsEditor: NSViewRepresentable {
                 scrollView.isFindBarVisible = false
             }
         }
-        if textView.string != text { // guard against the delegate write-back loop
+        // Guard against the delegate write-back loop. Compared through the storage's mutable
+        // string proxy: `textView.string` would bridge the whole document into a fresh String
+        // on every SwiftUI update, which at 200k lines is a few milliseconds each (#94).
+        if let storage = textView.textStorage, !storage.mutableString.isEqual(to: text) {
             textView.string = text
             Self.highlight(textView)
-            scrollView.verticalRulerView?.needsDisplay = true
+            (scrollView.verticalRulerView as? HostsLineNumberRulerView)?.textDidReplace()
         }
         if documentChanged {
             textView.setSelectedRange(NSRange(location: 0, length: 0))
@@ -211,19 +214,23 @@ final class HostsTextView: NSTextView {
 /// Never reads NSTextView.layoutManager, to avoid downgrading the main editor from TextKit 2.
 /// The editor does not soft-wrap, so a fixed line-height font can locate visible logical lines directly.
 @MainActor
-private final class HostsLineNumberRulerView: NSRulerView {
+final class HostsLineNumberRulerView: NSRulerView {
     private weak var textView: NSTextView?
+    /// Cached: the draw runs on every scroll tick, and deriving the count there would copy and
+    /// scan the whole document per frame (#94). Recomputed only when the text changes.
+    private(set) var lineCount = 1
 
     init(scrollView: NSScrollView, textView: NSTextView) {
         self.textView = textView
         super.init(scrollView: scrollView, orientation: .verticalRuler)
         clientView = textView
         ruleThickness = 40
+        recountLines()
 
         let center = NotificationCenter.default
         center.addObserver(
             self,
-            selector: #selector(invalidateRuler(_:)),
+            selector: #selector(textDidChange(_:)),
             name: NSText.didChangeNotification,
             object: textView
         )
@@ -239,8 +246,37 @@ private final class HostsLineNumberRulerView: NSRulerView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    /// For text swapped in without an edit notification (a document switch).
+    func textDidReplace() {
+        recountLines()
+        needsDisplay = true
+    }
+
+    @objc private func textDidChange(_ notification: Notification) {
+        recountLines()
+        needsDisplay = true
+    }
+
     @objc private func invalidateRuler(_ notification: Notification) {
         needsDisplay = true
+    }
+
+    /// Counts newlines on the storage's mutable string proxy — UTF-16 search, no String bridge.
+    private func recountLines() {
+        guard let storage = textView?.textStorage else { return }
+        let string = storage.mutableString
+        var count = 1
+        var searchRange = NSRange(location: 0, length: string.length)
+        while true {
+            let found = string.range(of: "\n", options: [.literal], range: searchRange)
+            if found.location == NSNotFound { break }
+            count += 1
+            searchRange = NSRange(
+                location: NSMaxRange(found),
+                length: string.length - NSMaxRange(found)
+            )
+        }
+        lineCount = count
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -256,9 +292,6 @@ private final class HostsLineNumberRulerView: NSRulerView {
     override func drawHashMarksAndLabels(in rect: NSRect) {
         guard let textView, let font = textView.font else { return }
 
-        let lineCount = textView.string.reduce(into: 1) { count, character in
-            if character == "\n" { count += 1 }
-        }
         let digits = max(2, String(lineCount).count)
         let desiredThickness = max(40, CGFloat(digits * 8 + 16))
         if ruleThickness != desiredThickness {
