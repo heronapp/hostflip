@@ -297,3 +297,9 @@
 /* Editor */
 "Toggle Comment" = "切換註解";
 "This line has a single field; every entry needs an IP address and at least one hostname." = "此行只有一個欄位；每個項目都需要一個 IP 位址和至少一個主機名稱。";
+
+/* Global search */
+"Search all profiles" = "搜尋所有方案";
+"Find in All Profiles…" = "在所有方案中尋找…";
+"No Matches" = "沒有相符項目";
+"Line %lld" = "第 %lld 行";

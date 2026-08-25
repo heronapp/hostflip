@@ -182,6 +182,9 @@ struct MainWindowView: View {
     let store: WorkspaceStore
     let maintenanceStore: MaintenanceStore
     @State private var selection: SidebarItem? = .baseHosts
+    @State private var searchQuery = ""
+    @State private var searchPresented = false
+    @State private var editorReveal: EditorReveal?
     /// The profile pending deletion confirmation; a non-nil value shows the confirmation dialog.
     @State private var profilePendingDeletion: Profile?
     @State private var profilePendingNameFocus: Profile.ID?
@@ -364,8 +367,72 @@ struct MainWindowView: View {
         }
     }
 
-    private var sidebar: some View {
-        List(selection: $selection) {
+    private var isSearching: Bool {
+        !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var searchResults: GlobalSearchResults {
+        var documents = [GlobalSearchResults.Document(
+            item: .baseHosts, name: String(localized: "Base Hosts"), content: store.baseHostsContent, isActive: nil
+        )]
+        let profiles = store.standaloneProfiles + store.groups.flatMap(\.profiles)
+        documents += profiles.map {
+            GlobalSearchResults.Document(item: .profile($0.id), name: $0.name, content: $0.content, isActive: store.isActive($0.id))
+        }
+        return GlobalSearchResults(documents: documents, query: searchQuery)
+    }
+
+    /// Jumps to the matching line: the shared editor swaps the document, then reveals the range.
+    private func showSearchMatch(_ result: GlobalSearchResults.DocumentResult, _ match: GlobalSearchResults.Match) {
+        selection = result.document.item
+        editorReveal = EditorReveal(id: UUID(), range: match.hit.lineRange)
+    }
+
+    @ViewBuilder
+    private var searchResultRows: some View {
+        let results = searchResults
+        if results.results.isEmpty {
+            Text("No Matches")
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 12)
+        }
+        ForEach(results.results) { result in
+            Section {
+                ForEach(result.matches) { match in
+                    Button {
+                        showSearchMatch(result, match)
+                    } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(match.displayText)
+                                .font(.system(.body, design: .monospaced))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            Spacer(minLength: 4)
+                            Text("Line \(match.hit.line)")
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .layoutPriority(1)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            } header: {
+                HStack(spacing: 6) {
+                    Text(result.document.name)
+                    if result.document.isActive == true {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.blue)
+                            .accessibilityLabel(Text("Active"))
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var sidebarItems: some View {
             Label {
                 Text("System Hosts")
             } icon: {
@@ -417,14 +484,30 @@ struct MainWindowView: View {
                     groupHeader(group, index: groupIndex)
                 }
             }
+    }
+
+    private var sidebar: some View {
+        List(selection: $selection) {
+            if isSearching {
+                searchResultRows
+            } else {
+                sidebarItems
+            }
         }
         .listStyle(.sidebar)
+        .searchable(
+            text: $searchQuery, isPresented: $searchPresented, placement: .sidebar,
+            prompt: Text("Search all profiles")
+        )
+        .onReceive(NotificationCenter.default.publisher(for: .hostflipFindInAllProfiles)) { _ in
+            searchPresented = true
+        }
         .focused($sidebarHasFocus)
         .onKeyPress(.return) {
             toggleSelectedProfileActivation() ? .handled : .ignored
         }
         .overlay {
-            if presentation.showsEmptyState {
+            if presentation.showsEmptyState, !isSearching {
                 sidebarEmptyState
                     .offset(y: 24)
             }
@@ -1024,7 +1107,8 @@ struct MainWindowView: View {
             // Read-only for Base Hosts and for Remote Profiles alike: the former only changes
             // through drift reconciliation, the latter only through Refresh (ADR-0012).
             isEditable: profile?.isRemote == false,
-            documentID: profileID.map { AnyHashable($0) } ?? AnyHashable("base-hosts")
+            documentID: profileID.map { AnyHashable($0) } ?? AnyHashable("base-hosts"),
+            reveal: editorReveal
         )
         // Read here, in a View body, so the focus change re-renders and reaches the Edit menu (#86).
         .focusedSceneValue(\.isHostsEditorEditable, HostsEditorFocus.shared.isEditableEditorFocused)
