@@ -299,7 +299,7 @@
 "This line has a single field; every entry needs an IP address and at least one hostname." = "この行はフィールドが 1 つしかありません。各エントリには IP アドレスと 1 つ以上のホスト名が必要です。";
 
 /* Global search */
-"Search all profiles" = "すべてのプロファイルを検索";
+"Search" = "検索";
 "Find in All Profiles…" = "すべてのプロファイルから検索…";
 "No Matches" = "一致なし";
 "Line %lld" = "%lld 行目";

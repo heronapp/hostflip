@@ -299,7 +299,7 @@
 "This line has a single field; every entry needs an IP address and at least one hostname." = "此行只有一个字段；每条记录都需要一个 IP 地址和至少一个主机名。";
 
 /* Global search */
-"Search all profiles" = "搜索所有方案";
+"Search" = "搜索";
 "Find in All Profiles…" = "在所有方案中查找…";
 "No Matches" = "无匹配";
 "Line %lld" = "第 %lld 行";

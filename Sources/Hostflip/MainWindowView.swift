@@ -511,7 +511,7 @@ struct MainWindowView: View {
         .listStyle(.sidebar)
         .searchable(
             text: $searchQuery, isPresented: $searchPresented, placement: .sidebar,
-            prompt: Text("Search all profiles")
+            prompt: Text("Search")
         )
         .onReceive(NotificationCenter.default.publisher(for: .hostflipFindInAllProfiles)) { _ in
             searchPresented = true
