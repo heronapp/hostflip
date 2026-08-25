@@ -323,6 +323,29 @@ final class WorkspaceStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testDuplicateOfAForeignlyDeletedProfileIsDroppedAndReturnsNil() throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub())
+        let profileID = try XCTUnwrap(store.createStandaloneProfile())
+        foreignlyModifyWorkspace { try $0.deleteProfile(profileID) }
+
+        XCTAssertNil(store.duplicateProfile(profileID))
+
+        XCTAssertEqual(store.standaloneProfiles, [])
+        XCTAssertNil(store.saveError)
+    }
+
+    @MainActor
+    func testDuplicateNamesTheCopyAfterAForeignRename() throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub())
+        let profileID = try XCTUnwrap(store.createStandaloneProfile())
+        foreignlyModifyWorkspace { try $0.renameProfile(profileID, to: "renamed") }
+
+        let copyID = try XCTUnwrap(store.duplicateProfile(profileID))
+
+        XCTAssertEqual(store.profile(copyID)?.name, "renamed Copy")
+    }
+
+    @MainActor
     func testDuplicateUnknownProfileIsIgnored() throws {
         let store = makeStore(coordinator: SwitchCoordinatingStub())
         let profileID = try XCTUnwrap(store.createStandaloneProfile())

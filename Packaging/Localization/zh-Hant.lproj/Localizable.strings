@@ -58,7 +58,7 @@
 "PROFILE_DEFAULT_NAME_NUMBERED" = "新方案 %lld";
 "GROUP_DEFAULT_NAME" = "新群組";
 "GROUP_DEFAULT_NAME_NUMBERED" = "新群組 %lld";
-"PROFILE_COPY_NAME" = "%@ 拷貝";
+"PROFILE_COPY_NAME" = "%@ 副本";
 "Group Name" = "群組名稱";
 "Rename Group…" = "重新命名群組…";
 "Move Up" = "上移";

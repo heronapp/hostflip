@@ -372,13 +372,20 @@ final class WorkspaceStore {
     /// unique, matching the rename semantics.
     @discardableResult
     func duplicateProfile(_ profileID: Profile.ID) -> Profile.ID? {
-        guard let profile = profile(profileID) else { return nil }
+        guard profile(profileID) != nil else { return nil }
         let copyID = Profile.ID(UUID().uuidString)
-        // Semantic key: the suffix is a name fragment, not a command, and each language
-        // places it differently (see PROFILE_DEFAULT_NAME).
-        let name = String(localized: "PROFILE_COPY_NAME", defaultValue: "\(profile.name) Copy")
-        applyEdit { try $0.duplicateProfile(profileID, as: copyID, name: name) }
-        return copyID
+        applyEdit { model in
+            // The name derives from the replayed model, so a concurrent foreign rename is
+            // reflected; a foreign deletion drops the edit like any other.
+            guard let latest = model.profile(profileID) else {
+                throw ActivationModelError.unknownProfile(profileID)
+            }
+            // Semantic key: the suffix is a name fragment, not a command, and each language
+            // places it differently (see PROFILE_DEFAULT_NAME).
+            let name = String(localized: "PROFILE_COPY_NAME", defaultValue: "\(latest.name) Copy")
+            try model.duplicateProfile(profileID, as: copyID, name: name)
+        }
+        return profile(copyID) == nil ? nil : copyID
     }
 
     func renameProfile(_ profileID: Profile.ID, to name: String) {
