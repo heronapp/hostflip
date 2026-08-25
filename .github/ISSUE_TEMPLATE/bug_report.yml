@@ -1,0 +1,33 @@
+name: Bug report
+description: Something in hostflip did not behave as expected.
+labels: [bug]
+body:
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Prefilled by Help › Report an Issue… in the app; otherwise app version, macOS version, and how you installed.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+  - type: textarea
+    id: diagnostic-report
+    attributes:
+      label: Diagnostic report
+      description: Help › Copy Diagnostic Report in the app, then paste here. It contains versions, helper state, and counts only — no hosts content, profile names, or URLs.
+      render: text

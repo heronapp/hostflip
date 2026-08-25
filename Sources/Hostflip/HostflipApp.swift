@@ -90,6 +90,7 @@ struct HostflipApp: App {
             RemoteRefreshCommands(store: store)
             EditorCommands()
             SearchCommands()
+            ReportIssueCommands(store: store, maintenanceStore: maintenanceStore)
         }
 
         Settings {

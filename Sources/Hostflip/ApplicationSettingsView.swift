@@ -44,8 +44,8 @@ struct ApplicationSettingsView: View {
                     Label("Command Line", systemImage: "terminal")
                 }
 
-            UpdatesSettingsView(updater: updater)
-                .frame(width: 500, height: 150, alignment: .top)
+            UpdatesSettingsView(updater: updater, store: store, maintenanceStore: maintenanceStore)
+                .frame(width: 500, height: 230, alignment: .top)
                 .tabItem {
                     Label("Updates", systemImage: "arrow.triangle.2.circlepath")
                 }
@@ -190,10 +190,15 @@ private struct GeneralSettingsView: View {
 /// automatic-check preference, this view only mirrors it.
 private struct UpdatesSettingsView: View {
     let updater: SPUUpdater
+    let store: WorkspaceStore
+    let maintenanceStore: MaintenanceStore
     @State private var automaticallyChecksForUpdates: Bool
+    @State private var reportCopiedAt: Date?
 
-    init(updater: SPUUpdater) {
+    init(updater: SPUUpdater, store: WorkspaceStore, maintenanceStore: MaintenanceStore) {
         self.updater = updater
+        self.store = store
+        self.maintenanceStore = maintenanceStore
         automaticallyChecksForUpdates = updater.automaticallyChecksForUpdates
     }
 
@@ -210,6 +215,31 @@ private struct UpdatesSettingsView: View {
                 }
 
             CheckForUpdatesButton(updater: updater)
+
+            // Problem reporting (#90) sits with updates: both are "something is off" entries.
+            LabeledContent("Support") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Button("Report an Issue…") {
+                        ProblemReporting.openNewIssue(store: store, maintenanceStore: maintenanceStore)
+                    }
+                    HStack(spacing: 8) {
+                        Button("Copy Diagnostic Report") {
+                            ProblemReporting.copyReport(store: store, maintenanceStore: maintenanceStore)
+                            reportCopiedAt = .now
+                        }
+                        if reportCopiedAt != nil {
+                            Text("Copied")
+                                .foregroundStyle(.secondary)
+                                .transition(.opacity)
+                        }
+                    }
+                }
+            }
+            .task(id: reportCopiedAt) {
+                guard reportCopiedAt != nil else { return }
+                try? await Task.sleep(for: .seconds(2))
+                reportCopiedAt = nil
+            }
         }
         .padding(20)
     }
