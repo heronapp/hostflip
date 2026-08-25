@@ -3,9 +3,9 @@ import SwiftUI
 
 /// Edit menu "Toggle Comment" (#86): dispatched down the responder chain to the focused
 /// `HostsTextView`. SwiftUI's Commands cannot validate through the responder chain, so the
-/// item follows the focus state the text view publishes.
+/// item follows the focused scene value the detail pane derives from the editor's focus.
 struct EditorCommands: Commands {
-    private let focus = HostsEditorFocus.shared
+    @FocusedValue(\.isHostsEditorEditable) private var isEditorEditable
 
     var body: some Commands {
         CommandGroup(after: .pasteboard) {
@@ -14,7 +14,7 @@ struct EditorCommands: Commands {
                 NSApp.sendAction(#selector(HostsTextView.toggleComment(_:)), to: nil, from: nil)
             }
             .keyboardShortcut("/", modifiers: .command)
-            .disabled(!focus.isEditableEditorFocused)
+            .disabled(isEditorEditable != true)
         }
     }
 }

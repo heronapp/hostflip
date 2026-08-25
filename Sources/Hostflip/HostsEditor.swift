@@ -140,20 +140,25 @@ struct HostsEditor: NSViewRepresentable {
     }
 }
 
-/// Whether an editable hosts editor currently holds keyboard focus — what the Edit-menu
-/// "Toggle Comment" item keys its enabled state on (#86). SwiftUI's Commands cannot
-/// consult NSUserInterfaceValidations, so the text view publishes its state here instead.
+/// Whether an editable hosts editor currently holds keyboard focus (#86). The text view
+/// publishes it here; the detail pane forwards it as a focused scene value, which is what
+/// the Edit-menu "Toggle Comment" item keys its enabled state on — a `Commands` body does
+/// not track `@Observable` reads, and a scene value also goes away with the key window.
 @Observable
 @MainActor
 final class HostsEditorFocus {
     static let shared = HostsEditorFocus()
     private(set) var isEditableEditorFocused = false
 
-    fileprivate func set(_ focused: Bool) {
+    fileprivate func setEditableEditorFocused(_ focused: Bool) {
         if isEditableEditorFocused != focused {
             isEditableEditorFocused = focused
         }
     }
+}
+
+extension FocusedValues {
+    @Entry var isHostsEditorEditable: Bool?
 }
 
 /// The hosts editor's text view: carries the editor-level actions that the Edit menu
@@ -162,17 +167,19 @@ final class HostsTextView: NSTextView {
     override var isEditable: Bool {
         didSet {
             // Flipped from updateNSView on an in-place document switch; publish outside the
-            // SwiftUI update pass.
+            // SwiftUI update pass, and only if focus has not moved on in the meantime.
             guard window?.firstResponder === self else { return }
-            let editable = isEditable
-            DispatchQueue.main.async { HostsEditorFocus.shared.set(editable) }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, window?.firstResponder === self else { return }
+                HostsEditorFocus.shared.setEditableEditorFocused(isEditable)
+            }
         }
     }
 
     override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()
         if accepted {
-            HostsEditorFocus.shared.set(isEditable)
+            HostsEditorFocus.shared.setEditableEditorFocused(isEditable)
         }
         return accepted
     }
@@ -180,7 +187,7 @@ final class HostsTextView: NSTextView {
     override func resignFirstResponder() -> Bool {
         let resigned = super.resignFirstResponder()
         if resigned {
-            HostsEditorFocus.shared.set(false)
+            HostsEditorFocus.shared.setEditableEditorFocused(false)
         }
         return resigned
     }

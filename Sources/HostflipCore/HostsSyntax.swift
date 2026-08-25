@@ -100,29 +100,37 @@ extension HostsSyntax {
     /// commented — mixed selections end up fully commented. Blank lines are skipped, and a
     /// target of blank lines only is a no-op (nil). Commenting inserts `# ` after the leading
     /// whitespace; uncommenting removes the first `#` and at most one following space.
-    /// Offsets are UTF-16 to match the editor's text storage.
+    /// Offsets are UTF-16 to match the editor's text storage; lines split where NSString's line APIs do.
     public static func toggleComment(in text: String, range: NSRange) -> HostsCommentToggle? {
         let ns = text as NSString
-        var target = range
-        if target.length > 0, isNewline(ns.character(at: NSMaxRange(target) - 1)) {
-            target.length -= 1
-        }
-        let editedRange = ns.lineRange(for: target)
+        let firstLine = ns.lineRange(for: NSRange(location: range.location, length: 0))
+        // The last target line is the one holding the selection's last character, so a
+        // selection ending at a line start leaves that line out.
+        let lastLine = range.length > 0
+            ? ns.lineRange(for: NSRange(location: NSMaxRange(range) - 1, length: 0))
+            : firstLine
+        let editedRange = NSRange(
+            location: firstLine.location,
+            length: NSMaxRange(lastLine) - firstLine.location
+        )
 
+        // Walked by hand: enumerateSubstrings(.byLines) skips an empty line at the end of the range,
+        // which must still count for the returned selection.
         var lines: [(content: NSRange, terminator: NSRange, indentEnd: Int)] = []
-        ns.enumerateSubstrings(
-            in: editedRange,
-            options: [.byLines, .substringNotRequired]
-        ) { _, content, enclosing, _ in
-            var indentEnd = content.location
-            while indentEnd < NSMaxRange(content), isIndentation(ns.character(at: indentEnd)) {
+        var position = editedRange.location
+        while position < NSMaxRange(editedRange) {
+            var start = 0, end = 0, contentsEnd = 0
+            ns.getLineStart(&start, end: &end, contentsEnd: &contentsEnd, for: NSRange(location: position, length: 0))
+            var indentEnd = start
+            while indentEnd < contentsEnd, isIndentation(ns.character(at: indentEnd)) {
                 indentEnd += 1
             }
             lines.append((
-                content,
-                NSRange(location: NSMaxRange(content), length: NSMaxRange(enclosing) - NSMaxRange(content)),
+                NSRange(location: start, length: contentsEnd - start),
+                NSRange(location: contentsEnd, length: end - contentsEnd),
                 indentEnd
             ))
+            position = end
         }
         let nonBlank = lines.filter { $0.indentEnd < NSMaxRange($0.content) }
         guard !nonBlank.isEmpty else { return nil }
@@ -172,11 +180,7 @@ extension HostsSyntax {
     private static let space: unichar = 0x20
 
     private static func isIndentation(_ character: unichar) -> Bool {
-        character == space || character == 0x09
-    }
-
-    private static func isNewline(_ character: unichar) -> Bool {
         guard let scalar = Unicode.Scalar(character) else { return false }
-        return CharacterSet.newlines.contains(scalar)
+        return CharacterSet.whitespaces.contains(scalar)
     }
 }

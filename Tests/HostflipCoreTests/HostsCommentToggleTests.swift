@@ -85,3 +85,23 @@ final class HostsCommentToggleTests: XCTestCase {
         XCTAssertEqual(edit.text, "x\n# a\n# b\ny")
     }
 }
+
+extension HostsCommentToggleTests {
+    func testSelectionKeepsAFullySelectedTrailingBlankLine() throws {
+        let edit = try XCTUnwrap(toggle("a\n\nb", 0, 3))
+        XCTAssertEqual(edit.text, "# a\n\nb")
+        XCTAssertEqual(edit.selection, NSRange(location: 0, length: 4))
+    }
+
+    func testUnicodeWhitespaceCountsAsBlankAndIndentation() throws {
+        XCTAssertNil(toggle("\u{00A0}\u{3000}", 0))
+        XCTAssertEqual(toggle("\u{3000}a", 0)?.text, "\u{3000}# a")
+        XCTAssertEqual(toggle("\u{3000}# a", 0)?.text, "\u{3000}a")
+    }
+
+    func testVerticalTabIsNotALineBreak() throws {
+        let edit = try XCTUnwrap(toggle("a\u{000B}b\nc", 0, 2))
+        XCTAssertEqual(edit.text, "# a\u{000B}b\nc")
+        XCTAssertEqual(edit.selection, NSRange(location: 0, length: 5))
+    }
+}
