@@ -108,3 +108,26 @@ final class HostsSyntaxTests: XCTestCase {
         XCTAssertNil(HostsSyntax.firstIncompleteLine(in: "not-an-ip some-host"))
     }
 }
+
+/// Every incomplete line (#87): the editor gutter flags all of them on the rule
+/// `firstIncompleteLine` enforces for the CLI.
+extension HostsSyntaxTests {
+    func testIncompleteLinesListsEveryOffendingLine() {
+        XCTAssertEqual(
+            HostsSyntax.incompleteLines(in: "stray\n1.1.1.1 a\n\n# note\n127.0.0.1 # tbd\nstray-again"),
+            [1, 5, 6]
+        )
+    }
+
+    func testIncompleteLinesIsEmptyForBlankCommentOnlyAndCompleteContent() {
+        XCTAssertEqual(HostsSyntax.incompleteLines(in: ""), [])
+        XCTAssertEqual(HostsSyntax.incompleteLines(in: "\n\n# only comments\n"), [])
+        XCTAssertEqual(HostsSyntax.incompleteLines(in: "0.0.0.0 a b\n::1 c # d"), [])
+    }
+
+    func testIncompleteLinesAgreesWithFirstIncompleteLine() {
+        for text in ["stray\n1.1.1.1 a\nstray again\n", "1.1.1.1 a", "", "127.0.0.1"] {
+            XCTAssertEqual(HostsSyntax.incompleteLines(in: text).first, HostsSyntax.firstIncompleteLine(in: text), text)
+        }
+    }
+}

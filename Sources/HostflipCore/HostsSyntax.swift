@@ -62,9 +62,24 @@ public enum HostsSyntax {
     /// values stay unvalidated, matching the tokenizer. Returns the 1-based number of the first
     /// incomplete line; nil when every line is blank, comment-only, or a full entry.
     public static func firstIncompleteLine(in text: String) -> Int? {
+        var first: Int?
+        enumerateIncompleteLines(in: text) { line, stop in
+            first = line
+            stop = true
+        }
+        return first
+    }
+
+    /// Every incomplete line, 1-based, on the rule of `firstIncompleteLine` (#87).
+    public static func incompleteLines(in text: String) -> [Int] {
+        var lines: [Int] = []
+        enumerateIncompleteLines(in: text) { line, _ in lines.append(line) }
+        return lines
+    }
+
+    private static func enumerateIncompleteLines(in text: String, _ body: @escaping (Int, inout Bool) -> Void) {
         let ns = text as NSString
         var lineNumber = 0
-        var incompleteLine: Int?
         ns.enumerateSubstrings(
             in: NSRange(location: 0, length: ns.length),
             options: [.byLines, .substringNotRequired]
@@ -76,11 +91,11 @@ public enum HostsSyntax {
                 codeRange.length = hash.location - lineRange.location
             }
             if fieldPattern.numberOfMatches(in: text, options: [], range: codeRange) == 1 {
-                incompleteLine = lineNumber
-                stop.pointee = true
+                var shouldStop = false
+                body(lineNumber, &shouldStop)
+                if shouldStop { stop.pointee = true }
             }
         }
-        return incompleteLine
     }
 }
 

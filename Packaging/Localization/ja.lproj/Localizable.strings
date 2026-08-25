@@ -296,3 +296,4 @@
 
 /* Editor */
 "Toggle Comment" = "コメントを切り替え";
+"This line has a single field; every entry needs an IP address and at least one hostname." = "この行はフィールドが 1 つしかありません。各エントリには IP アドレスと 1 つ以上のホスト名が必要です。";

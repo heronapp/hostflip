@@ -296,3 +296,4 @@
 
 /* Editor */
 "Toggle Comment" = "切换注释";
+"This line has a single field; every entry needs an IP address and at least one hostname." = "此行只有一个字段；每条记录都需要一个 IP 地址和至少一个主机名。";

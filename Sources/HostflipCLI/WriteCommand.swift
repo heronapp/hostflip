@@ -47,6 +47,8 @@ enum WriteCommand {
             )
         }
         let content = try readContent(filePath: filePath, readStandardInput: readStandardInput)
+        // Deliberate GUI/CLI asymmetry (#87): the editor only flags incomplete lines in its
+        // gutter and keeps saving, while a script should fail loudly. Do not align the two.
         if let line = HostsSyntax.firstIncompleteLine(in: content) {
             throw CLIError(
                 code: "invalid-hosts-syntax",
