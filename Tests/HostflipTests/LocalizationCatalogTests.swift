@@ -10,6 +10,7 @@ final class LocalizationCatalogTests: XCTestCase {
     private static let semanticKeys: Set<String> = [
         "PROFILE_DEFAULT_NAME", "PROFILE_DEFAULT_NAME_NUMBERED",
         "GROUP_DEFAULT_NAME", "GROUP_DEFAULT_NAME_NUMBERED",
+        "PROFILE_COPY_NAME",
     ]
 
     private static var repoRoot: URL {

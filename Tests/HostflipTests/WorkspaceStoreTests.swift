@@ -239,6 +239,100 @@ final class WorkspaceStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testDuplicateProfilePlacesAnInactiveCopyRightAfterTheOriginalAndPersists() async throws {
+        let coordinator = SwitchCoordinatingStub()
+        let store = makeStore(coordinator: coordinator)
+        let originalID = try XCTUnwrap(store.createStandaloneProfile())
+        let trailingID = try XCTUnwrap(store.createStandaloneProfile())
+        store.renameProfile(originalID, to: "staging")
+        store.updateProfileContent(originalID, content: "1.2.3.4 staging.example.com\n")
+        store.setProfileActive(originalID, true)
+        await store.switchTask?.value
+        let switchesBefore = coordinator.performedSwitches.count
+
+        let copyID = try XCTUnwrap(store.duplicateProfile(originalID))
+
+        XCTAssertEqual(store.standaloneProfiles.map(\.id), [originalID, copyID, trailingID])
+        let copy = try XCTUnwrap(store.profile(copyID))
+        XCTAssertEqual(copy.name, "staging Copy")
+        XCTAssertEqual(copy.content, "1.2.3.4 staging.example.com\n")
+        XCTAssertFalse(store.isActive(copyID))
+        XCTAssertTrue(store.isActive(originalID))
+        // The copy is inactive, so no switch is performed.
+        XCTAssertEqual(coordinator.performedSwitches.count, switchesBefore)
+
+        let reloaded = try reloadModel()
+        XCTAssertEqual(reloaded.standaloneProfiles.map(\.id), [originalID, copyID, trailingID])
+        XCTAssertEqual(reloaded.profile(copyID), copy)
+        XCTAssertEqual(reloaded.activeProfileIDs, [originalID])
+    }
+
+    @MainActor
+    func testDuplicateProfileInGroupStaysInTheGroupAfterTheOriginal() async throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub())
+        let groupID = try XCTUnwrap(store.createGroup())
+        let originalID = try XCTUnwrap(store.createProfile(in: groupID))
+        let trailingID = try XCTUnwrap(store.createProfile(in: groupID))
+        store.setProfileActive(originalID, true)
+        await store.switchTask?.value
+
+        let copyID = try XCTUnwrap(store.duplicateProfile(originalID))
+
+        XCTAssertEqual(store.standaloneProfiles, [])
+        XCTAssertEqual(store.groups.first?.profiles.map(\.id), [originalID, copyID, trailingID])
+        XCTAssertTrue(store.isActive(originalID))
+        XCTAssertFalse(store.isActive(copyID))
+        XCTAssertEqual(try reloadModel().groups.first?.profiles.map(\.id), [originalID, copyID, trailingID])
+    }
+
+    @MainActor
+    func testDuplicatingTwiceStacksTheNewestCopyRightAfterTheOriginal() throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub())
+        let originalID = try XCTUnwrap(store.createStandaloneProfile())
+
+        let firstCopyID = try XCTUnwrap(store.duplicateProfile(originalID))
+        let secondCopyID = try XCTUnwrap(store.duplicateProfile(originalID))
+
+        XCTAssertEqual(store.standaloneProfiles.map(\.id), [originalID, secondCopyID, firstCopyID])
+        // Names are not de-duplicated, matching the rename semantics.
+        XCTAssertEqual(store.standaloneProfiles.map(\.name), ["New Profile", "New Profile Copy", "New Profile Copy"])
+    }
+
+    @MainActor
+    func testDuplicateRemoteProfileKeepsTheHeaderWithoutRefreshHistory() async throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub(), fetchRemoteContent: { _ in
+            "9.9.9.9 fetched.example.com\n"
+        })
+        let originalID = try XCTUnwrap(store.createStandaloneProfile())
+        store.updateProfileContent(
+            originalID,
+            content: "#!hostflip-remote https://example.com/hosts.txt interval=6h\n"
+        )
+        _ = await store.confirmRemoteConversion()
+        let original = try XCTUnwrap(store.profile(originalID))
+        XCTAssertNotNil(original.remoteRefreshState)
+
+        let copyID = try XCTUnwrap(store.duplicateProfile(originalID))
+
+        let copy = try XCTUnwrap(store.profile(copyID))
+        XCTAssertTrue(copy.isRemote)
+        XCTAssertEqual(copy.remoteHeader, original.remoteHeader)
+        XCTAssertEqual(copy.content, original.content)
+        XCTAssertNil(copy.remoteRefreshState)
+        XCTAssertNil(try reloadModel().profile(copyID)?.remoteRefreshState)
+    }
+
+    @MainActor
+    func testDuplicateUnknownProfileIsIgnored() throws {
+        let store = makeStore(coordinator: SwitchCoordinatingStub())
+        let profileID = try XCTUnwrap(store.createStandaloneProfile())
+
+        XCTAssertNil(store.duplicateProfile(Profile.ID("missing")))
+
+        XCTAssertEqual(store.standaloneProfiles.map(\.id), [profileID])
+    }
+
+    @MainActor
     func testRenameAndEditPersistAcrossReload() throws {
         let store = makeStore(coordinator: SwitchCoordinatingStub())
         let profileID = try XCTUnwrap(store.createStandaloneProfile())

@@ -366,6 +366,21 @@ final class WorkspaceStore {
         return profileID
     }
 
+    /// Duplicates a profile in place (#89): the copy lands right after the original in the
+    /// same container, inactive, so it is a purely local edit — no helper interaction. Returns
+    /// the copy's ID so the caller can select it for renaming. The suffixed name is not made
+    /// unique, matching the rename semantics.
+    @discardableResult
+    func duplicateProfile(_ profileID: Profile.ID) -> Profile.ID? {
+        guard let profile = profile(profileID) else { return nil }
+        let copyID = Profile.ID(UUID().uuidString)
+        // Semantic key: the suffix is a name fragment, not a command, and each language
+        // places it differently (see PROFILE_DEFAULT_NAME).
+        let name = String(localized: "PROFILE_COPY_NAME", defaultValue: "\(profile.name) Copy")
+        applyEdit { try $0.duplicateProfile(profileID, as: copyID, name: name) }
+        return copyID
+    }
+
     func renameProfile(_ profileID: Profile.ID, to name: String) {
         guard let profile = profile(profileID),
               let normalized = normalizedRenameName(name, currentName: profile.name) else { return }
