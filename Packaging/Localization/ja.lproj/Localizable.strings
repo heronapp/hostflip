@@ -304,3 +304,9 @@
 "No Matches" = "一致する項目はありません";
 "Line %lld" = "%lld 行目";
 "%lld more matches not shown" = "他 %lld 件は表示されていません";
+
+/* Problem reporting */
+"Report an Issue…" = "問題を報告…";
+"Copy Diagnostic Report" = "診断レポートをコピー";
+"Diagnostic report copied" = "診断レポートをコピーしました";
+"Support" = "サポート";

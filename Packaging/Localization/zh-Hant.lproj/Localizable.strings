@@ -304,3 +304,9 @@
 "No Matches" = "沒有相符項目";
 "Line %lld" = "第 %lld 行";
 "%lld more matches not shown" = "還有 %lld 筆相符項目未顯示";
+
+/* Problem reporting */
+"Report an Issue…" = "回報問題…";
+"Copy Diagnostic Report" = "拷貝診斷報告";
+"Diagnostic report copied" = "已拷貝診斷報告";
+"Support" = "支援";

@@ -304,3 +304,9 @@
 "No Matches" = "无匹配项";
 "Line %lld" = "第 %lld 行";
 "%lld more matches not shown" = "还有 %lld 条匹配未显示";
+
+/* Problem reporting */
+"Report an Issue…" = "报告问题…";
+"Copy Diagnostic Report" = "拷贝诊断报告";
+"Diagnostic report copied" = "诊断报告已拷贝";
+"Support" = "支持";
