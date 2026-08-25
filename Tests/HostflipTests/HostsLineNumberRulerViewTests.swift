@@ -26,6 +26,9 @@ final class HostsLineNumberRulerViewTests: XCTestCase {
         XCTAssertEqual(makeRuler("").2.lineCount, 1)
         XCTAssertEqual(makeRuler("a\nb").2.lineCount, 2)
         XCTAssertEqual(makeRuler("a\nb\n").2.lineCount, 3)
+        // Every terminator TextKit 2 and HostsSyntax split on counts, not only LF.
+        XCTAssertEqual(makeRuler("a\rb\r\nc\u{2028}d").2.lineStarts, [0, 2, 5, 7])
+        XCTAssertEqual(makeRuler("a\r").2.lineStarts, [0, 2])
     }
 
     /// The bounds observer only marks the ruler dirty; it never touches the storage.
@@ -118,5 +121,34 @@ extension HostsLineNumberRulerViewTests {
         let ruler = makeLaidOutRuler("", width: 300)
         let labels = try XCTUnwrap(ruler.labels(in: NSRect(x: 0, y: 0, width: 300, height: 300)))
         XCTAssertEqual(labels.map(\.line), [1])
+    }
+}
+
+extension HostsLineNumberRulerViewTests {
+    func testIncompleteLinesFollowEdits() {
+        let (_, textView, ruler) = makeRuler("127.0.0.1\n# note\n1.1.1.1 a")
+        XCTAssertEqual(ruler.incompleteLines, [1])
+        textView.insertText(" app.test", replacementRange: NSRange(location: 9, length: 0))
+        XCTAssertEqual(ruler.incompleteLines, [])
+        textView.insertText("\nstray", replacementRange: NSRange(location: (textView.string as NSString).length, length: 0))
+        XCTAssertEqual(ruler.incompleteLines, [4])
+        textView.insertText("# ", replacementRange: NSRange(location: (textView.string as NSString).length - 5, length: 0))
+        XCTAssertEqual(ruler.incompleteLines, [])
+        textView.string = "fresh document"
+        XCTAssertEqual(ruler.incompleteLines, [])
+    }
+
+    func testTooltipIsServedOnlyOnFlaggedRows() throws {
+        let ruler = makeLaidOutRuler("1.1.1.1 a\n127.0.0.1\n", width: 300)
+        let textView = try XCTUnwrap(ruler.clientView as? NSTextView)
+        let labels = try XCTUnwrap(ruler.labels(in: textView.visibleRect))
+        func tooltip(onLine line: Int) -> String {
+            let label = labels.first { $0.line == line }!
+            let point = ruler.convert(NSPoint(x: 0, y: label.y + label.height / 2), from: textView)
+            return ruler.view(ruler, stringForToolTip: 0, point: point, userData: nil)
+        }
+        XCTAssertEqual(tooltip(onLine: 1), "")
+        XCTAssertEqual(tooltip(onLine: 2), HostsLineNumberRulerView.incompleteLineTooltip)
+        XCTAssertEqual(tooltip(onLine: 3), "")
     }
 }

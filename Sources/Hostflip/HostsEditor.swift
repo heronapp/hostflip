@@ -220,6 +220,13 @@ final class HostsLineNumberRulerView: NSRulerView {
     /// storage from there.
     private(set) var lineStarts: [Int] = [0]
     var lineCount: Int { lineStarts.count }
+    /// 1-based numbers of structurally incomplete lines (#87), rebuilt with `lineStarts`.
+    /// The gutter only warns — saving and merging are untouched; the CLI's `write` is the
+    /// one that refuses such content.
+    private(set) var incompleteLines: Set<Int> = []
+    static let incompleteLineTooltip = String(
+        localized: "This line has a single field; every entry needs an IP address and at least one hostname."
+    )
 
     init(scrollView: NSScrollView, textView: NSTextView) {
         self.textView = textView
@@ -227,6 +234,7 @@ final class HostsLineNumberRulerView: NSRulerView {
         clientView = textView
         ruleThickness = 40
         rebuildLineStarts()
+        addToolTip(bounds, owner: self, userData: nil)
 
         let center = NotificationCenter.default
         center.addObserver(
@@ -258,27 +266,32 @@ final class HostsLineNumberRulerView: NSRulerView {
         needsDisplay = true
     }
 
-    /// Finds newlines on the storage's mutable string proxy — UTF-16 search, no String bridge.
+    /// Walks the storage's mutable string proxy with NSString's line API — UTF-16, no String
+    /// bridge, and the same line breaks as HostsSyntax (.byLines) and TextKit 2 paragraphs,
+    /// so a bare CR counts as a line here too.
     private func rebuildLineStarts() {
         guard let storage = textView?.textStorage else { return }
         let string = storage.mutableString
         var starts = [0]
-        var searchRange = NSRange(location: 0, length: string.length)
-        while true {
-            let found = string.range(of: "\n", options: [.literal], range: searchRange)
-            if found.location == NSNotFound { break }
-            starts.append(NSMaxRange(found))
-            searchRange = NSRange(
-                location: NSMaxRange(found),
-                length: string.length - NSMaxRange(found)
-            )
+        var position = 0
+        while position < string.length {
+            var end = 0, contentsEnd = 0
+            string.getLineStart(nil, end: &end, contentsEnd: &contentsEnd, for: NSRange(location: position, length: 0))
+            if contentsEnd < end { // a terminator opens the next line, even an empty trailing one
+                starts.append(end)
+            }
+            position = end
         }
         lineStarts = starts
+        // Bridges the document once per character edit — the same order of work as the
+        // highlighting pass, and large Remote Profiles are read-only, so this runs on load only.
+        incompleteLines = Set(HostsSyntax.incompleteLines(in: string as String))
 
         // Sized here, not in draw: changing the thickness re-tiles the scroll view, and doing
         // that mid-draw left the clip view scrolled sideways by the width difference.
+        // Digits right-aligned, plus a marker column on the left (#87).
         let digits = max(2, String(lineCount).count)
-        let desiredThickness = max(40, CGFloat(digits * 8 + 16))
+        let desiredThickness = max(40, CGFloat(digits * 7 + 24))
         if ruleThickness != desiredThickness {
             ruleThickness = desiredThickness
             if let clipView = scrollView?.contentView {
@@ -295,6 +308,24 @@ final class HostsLineNumberRulerView: NSRulerView {
             if lineStarts[mid] <= offset { low = mid } else { high = mid - 1 }
         }
         return low + 1
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        removeAllToolTips()
+        addToolTip(bounds, owner: self, userData: nil)
+    }
+
+    /// NSViewToolTipOwner: the tooltip is served per row, only markers explain themselves.
+    @objc func view(
+        _ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData: UnsafeMutableRawPointer?
+    ) -> String {
+        guard let textView, let labels = labels(in: textView.visibleRect) else { return "" }
+        let y = convert(point, to: textView).y
+        guard let label = labels.first(where: { $0.y <= y && y < $0.y + $0.height }),
+              incompleteLines.contains(label.line)
+        else { return "" }
+        return Self.incompleteLineTooltip
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -380,10 +411,25 @@ final class HostsLineNumberRulerView: NSRulerView {
             .foregroundColor: NSColor.tertiaryLabelColor,
             .paragraphStyle: paragraphStyle,
         ]
+        let marker = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: nil)?
+            .withSymbolConfiguration(
+                NSImage.SymbolConfiguration(pointSize: 9, weight: .bold)
+                    .applying(.init(paletteColors: [.systemYellow]))
+            )
         for label in labels {
             let point = convert(NSPoint(x: 0, y: label.y), from: textView)
             let labelRect = NSRect(x: 4, y: point.y, width: bounds.width - 10, height: label.height)
             String(label.line).draw(in: labelRect, withAttributes: attributes)
+            if incompleteLines.contains(label.line), let marker {
+                let size = marker.size
+                let markerRect = NSRect(
+                    x: 3, y: point.y + (label.height - size.height) / 2, width: size.width, height: size.height
+                )
+                marker.draw(
+                    in: markerRect, from: .zero, operation: .sourceOver, fraction: 1,
+                    respectFlipped: true, hints: nil
+                )
+            }
         }
     }
 }
