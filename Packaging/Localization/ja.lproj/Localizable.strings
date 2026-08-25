@@ -300,6 +300,6 @@
 
 /* Global search */
 "Search" = "検索";
-"Find in All Profiles…" = "すべてのプロファイルから検索…";
-"No Matches" = "一致なし";
+"Find in All Profiles…" = "すべてのプロファイル内を検索…";
+"No Matches" = "一致する項目はありません";
 "Line %lld" = "%lld 行目";

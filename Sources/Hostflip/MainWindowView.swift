@@ -396,6 +396,14 @@ struct MainWindowView: View {
         isSearching ? SearchRequest(query: searchQuery, documents: searchDocuments) : nil
     }
 
+    private static func findSearchField(in view: NSView) -> NSSearchField? {
+        if let field = view as? NSSearchField { return field }
+        for subview in view.subviews {
+            if let field = findSearchField(in: subview) { return field }
+        }
+        return nil
+    }
+
     /// Jumps to the matching line: the shared editor swaps the document, then reveals the range.
     private func showSearchMatch(_ result: GlobalSearchResults.DocumentResult, _ match: GlobalSearchResults.Match) {
         selection = result.document.item
@@ -514,7 +522,15 @@ struct MainWindowView: View {
             prompt: Text("Search")
         )
         .onReceive(NotificationCenter.default.publisher(for: .hostflipFindInAllProfiles)) { _ in
-            searchPresented = true
+            // A presented field can have lost focus, and re-presenting is a no-op for SwiftUI
+            // (macOS 15's searchFocused is out of reach), so focus the AppKit field directly.
+            guard searchPresented else {
+                searchPresented = true
+                return
+            }
+            if let window = NSApp.keyWindow, let field = window.contentView.flatMap(Self.findSearchField) {
+                window.makeFirstResponder(field)
+            }
         }
         .task(id: searchRequest) {
             guard let request = searchRequest else {

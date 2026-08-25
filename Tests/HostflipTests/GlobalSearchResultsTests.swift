@@ -20,7 +20,6 @@ final class GlobalSearchResultsTests: XCTestCase {
         XCTAssertEqual(results.results.map(\.document.name), ["dev"])
         XCTAssertEqual(results.results[0].matches.map(\.lineText), ["10.0.0.1   api.test", "# api down"])
         XCTAssertEqual(results.results[0].matches.map(\.hit.line), [1, 2])
-        XCTAssertEqual(results.matchCount, 2)
     }
 
     func testBaseHostsTakesPartAndOrderFollowsTheSidebar() {

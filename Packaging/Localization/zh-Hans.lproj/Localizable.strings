@@ -301,5 +301,5 @@
 /* Global search */
 "Search" = "搜索";
 "Find in All Profiles…" = "在所有方案中查找…";
-"No Matches" = "无匹配";
+"No Matches" = "无匹配项";
 "Line %lld" = "第 %lld 行";

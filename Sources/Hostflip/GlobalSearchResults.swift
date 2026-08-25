@@ -47,7 +47,6 @@ struct GlobalSearchResults: Equatable {
     /// The trimmed query these results answer.
     let query: String
     let results: [DocumentResult]
-    var matchCount: Int { results.reduce(0) { $0 + $1.matches.count } }
 
     static let empty = GlobalSearchResults(documents: [], query: "")
 
