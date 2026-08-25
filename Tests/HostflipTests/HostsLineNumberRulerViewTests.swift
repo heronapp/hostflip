@@ -5,6 +5,13 @@ import XCTest
 /// The line-number ruler caches its line count (#94): scrolling must never rescan the document.
 @MainActor
 final class HostsLineNumberRulerViewTests: XCTestCase {
+    @MainActor
+    private final class UndoDelegate: NSObject, NSTextViewDelegate {
+        let undoManager: UndoManager
+        init(undoManager: UndoManager) { self.undoManager = undoManager }
+        func undoManager(for view: NSTextView) -> UndoManager? { undoManager }
+    }
+
     private func makeRuler(_ text: String) -> (NSScrollView, HostsTextView, HostsLineNumberRulerView) {
         let scrollView = HostsTextView.scrollableTextView()
         let textView = scrollView.documentView as! HostsTextView
@@ -21,23 +28,42 @@ final class HostsLineNumberRulerViewTests: XCTestCase {
         XCTAssertEqual(makeRuler("a\nb\n").2.lineCount, 3)
     }
 
-    func testBoundsChangeDoesNotRecount() {
+    /// The bounds observer only marks the ruler dirty; it never touches the storage.
+    func testBoundsChangeObserverDoesNotRecount() {
         let (scrollView, textView, ruler) = makeRuler("a\nb")
-        // Mutate the storage behind the ruler's back: a recount on scroll would see 4 lines.
-        textView.textStorage?.replaceCharacters(in: NSRange(location: 0, length: 0), with: "x\ny\n")
+        // Deafen the ruler to edits, then mutate: a recount on the scroll path would see 4 lines.
+        NotificationCenter.default.removeObserver(
+            ruler, name: NSTextStorage.didProcessEditingNotification, object: nil
+        )
+        textView.textStorage?.mutableString.setString("x\ny\na\nb")
         NotificationCenter.default.post(
             name: NSView.boundsDidChangeNotification, object: scrollView.contentView
         )
         XCTAssertEqual(ruler.lineCount, 2)
     }
 
-    func testEditsAndDocumentSwapsRecount() {
+    func testEditsUndoToggleCommentAndDocumentSwapsRecount() {
         let (_, textView, ruler) = makeRuler("a\nb")
+        let undoManager = UndoManager()
+        let delegate = UndoDelegate(undoManager: undoManager)
+        textView.delegate = delegate
+        textView.allowsUndo = true
+
         textView.insertText("c\n", replacementRange: NSRange(location: 0, length: 0))
         XCTAssertEqual(ruler.lineCount, 3)
+        textView.breakUndoCoalescing()
+        undoManager.undo()
+        XCTAssertEqual(textView.string, "a\nb")
+        XCTAssertEqual(ruler.lineCount, 2)
 
-        textView.string = "one"
-        ruler.textDidReplace()
+        textView.setSelectedRange(NSRange(location: 0, length: 3))
+        textView.toggleComment(nil)
+        XCTAssertEqual(textView.string, "# a\n# b")
+        XCTAssertEqual(ruler.lineCount, 2)
+        textView.insertText("\n", replacementRange: NSRange(location: 0, length: 0))
+        XCTAssertEqual(ruler.lineCount, 3)
+
+        textView.string = "one" // a document switch assigns the string without an edit notification
         XCTAssertEqual(ruler.lineCount, 1)
     }
 }

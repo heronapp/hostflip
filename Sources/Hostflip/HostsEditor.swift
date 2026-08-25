@@ -79,7 +79,6 @@ struct HostsEditor: NSViewRepresentable {
         if let storage = textView.textStorage, !storage.mutableString.isEqual(to: text) {
             textView.string = text
             Self.highlight(textView)
-            (scrollView.verticalRulerView as? HostsLineNumberRulerView)?.textDidReplace()
         }
         if documentChanged {
             textView.setSelectedRange(NSRange(location: 0, length: 0))
@@ -217,7 +216,10 @@ final class HostsTextView: NSTextView {
 final class HostsLineNumberRulerView: NSRulerView {
     private weak var textView: NSTextView?
     /// Cached: the draw runs on every scroll tick, and deriving the count there would copy and
-    /// scan the whole document per frame (#94). Recomputed only when the text changes.
+    /// scan the whole document per frame (#94). Recomputed only when characters change — observed
+    /// on the storage rather than through NSText.didChangeNotification, which undo does not post.
+    /// Read-only in didProcessEditing: the attribute-merging hazard noted at the top of the file
+    /// only concerns mutating the storage from there.
     private(set) var lineCount = 1
 
     init(scrollView: NSScrollView, textView: NSTextView) {
@@ -230,9 +232,9 @@ final class HostsLineNumberRulerView: NSRulerView {
         let center = NotificationCenter.default
         center.addObserver(
             self,
-            selector: #selector(textDidChange(_:)),
-            name: NSText.didChangeNotification,
-            object: textView
+            selector: #selector(storageDidProcessEditing(_:)),
+            name: NSTextStorage.didProcessEditingNotification,
+            object: textView.textStorage
         )
         center.addObserver(
             self,
@@ -246,13 +248,9 @@ final class HostsLineNumberRulerView: NSRulerView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    /// For text swapped in without an edit notification (a document switch).
-    func textDidReplace() {
-        recountLines()
-        needsDisplay = true
-    }
-
-    @objc private func textDidChange(_ notification: Notification) {
+    @objc private func storageDidProcessEditing(_ notification: Notification) {
+        guard let storage = notification.object as? NSTextStorage,
+              storage.editedMask.contains(.editedCharacters) else { return } // highlighting only
         recountLines()
         needsDisplay = true
     }
