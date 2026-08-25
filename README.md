@@ -4,7 +4,7 @@ Native macOS hosts switcher. Flip between `/etc/hosts` profiles from your menu b
 
 **Free and open source (MIT).**
 
-![hostflip main window: profile groups in the sidebar, a remote profile with its source and freshness on the right](docs/screenshots/main-window.png)
+![hostflip main window: standalone profiles and profile groups in the sidebar, a local profile open in the editor with commented-out mappings](docs/screenshots/main-window.png)
 
 ## Why hostflip
 
@@ -19,7 +19,7 @@ Most hosts managers treat `/etc/hosts` as their own: every save rewrites the who
 - **Switching from SwitchHosts? One click.** hostflip detects SwitchHosts data in any of its three generations (v3/v4/v5) and imports the lot: folders become groups, remote rules become Remote Profiles that keep refreshing on their own, and everything arrives inactive with a full summary of what came in, what was skipped, and what was adjusted. The [migration guide](docs/migrating-from-switchhosts.md) covers what carries over, what works differently, and the order of operations.
 
 <p align="center">
-  <img src="docs/screenshots/menu-bar.png" width="293" alt="Quick switching from the menu bar: standalone profiles on top, groups as submenus with each group's active profile shown as a badge">
+  <img src="docs/screenshots/menu-bar.png" width="238" alt="Quick switching from the menu bar: standalone profiles on top, groups as submenus with each group's active profile shown as a badge">
 </p>
 
 ![Drift review: external changes to the system hosts shown as a diff before reconciling](docs/screenshots/drift-review.png)
