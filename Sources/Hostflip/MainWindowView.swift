@@ -182,6 +182,12 @@ struct MainWindowView: View {
     let store: WorkspaceStore
     let maintenanceStore: MaintenanceStore
     @State private var selection: SidebarItem? = .baseHosts
+    @State private var searchQuery = ""
+    @State private var searchPresented = false
+    @State private var editorReveal: EditorReveal?
+    /// Computed off the main thread per (query, documents): a keystroke must not rescan a
+    /// 90k-line Remote Profile synchronously (#94 scale).
+    @State private var searchResults = GlobalSearchResults.empty
     /// The profile pending deletion confirmation; a non-nil value shows the confirmation dialog.
     @State private var profilePendingDeletion: Profile?
     @State private var profilePendingNameFocus: Profile.ID?
@@ -364,67 +370,191 @@ struct MainWindowView: View {
         }
     }
 
-    private var sidebar: some View {
-        List(selection: $selection) {
-            Label {
-                Text("System Hosts")
-            } icon: {
-                Image(systemName: "cpu")
-                    .foregroundStyle(.blue)
-            }
-            .tag(SidebarItem.systemHosts)
-            Label("Base Hosts", systemImage: "lock.fill")
-                .tag(SidebarItem.baseHosts)
+    private var isSearching: Bool {
+        !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Every searchable document in sidebar order; System Hosts is the merge output, so its
+    /// hits are already attributable to one of these.
+    private var searchDocuments: [GlobalSearchResults.Document] {
+        var documents = [GlobalSearchResults.Document(
+            item: .baseHosts, name: String(localized: "Base Hosts"), content: store.baseHostsContent, isActive: nil
+        )]
+        let profiles = store.standaloneProfiles + store.groups.flatMap(\.profiles)
+        documents += profiles.map {
+            GlobalSearchResults.Document(item: .profile($0.id), name: $0.name, content: $0.content, isActive: store.isActive($0.id))
+        }
+        return documents
+    }
+
+    private struct SearchRequest: Equatable {
+        let query: String
+        let documents: [GlobalSearchResults.Document]
+    }
+
+    private var searchRequest: SearchRequest? {
+        isSearching ? SearchRequest(query: searchQuery, documents: searchDocuments) : nil
+    }
+
+    private static func findSearchField(in view: NSView) -> NSSearchField? {
+        if let field = view as? NSSearchField { return field }
+        for subview in view.subviews {
+            if let field = findSearchField(in: subview) { return field }
+        }
+        return nil
+    }
+
+    /// Jumps to the matching line: the shared editor swaps the document, then reveals the range.
+    private func showSearchMatch(_ result: GlobalSearchResults.DocumentResult, _ match: GlobalSearchResults.Match) {
+        selection = result.document.item
+        editorReveal = EditorReveal(id: UUID(), range: match.hit.lineRange)
+    }
+
+    @ViewBuilder
+    private var searchResultRows: some View {
+        let results = searchResults
+        if results.results.isEmpty, results.query == searchQuery.trimmingCharacters(in: .whitespacesAndNewlines) {
+            Text("No Matches")
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 12)
+        }
+        ForEach(results.results) { result in
             Section {
-                if !presentation.showsEmptyState {
-                    ForEach(store.standaloneProfiles) { profile in
+                ForEach(result.matches) { match in
+                    Button {
+                        showSearchMatch(result, match)
+                    } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(match.displayText)
+                                .font(.system(.body, design: .monospaced))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            Spacer(minLength: 4)
+                            Text("Line \(match.hit.line)")
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .layoutPriority(1)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                if result.hiddenMatchCount > 0 {
+                    Text("\(result.hiddenMatchCount) more matches not shown")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                HStack(spacing: 6) {
+                    Text(result.document.name)
+                    if result.document.isActive == true {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.blue)
+                            .accessibilityLabel(Text("Active"))
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var sidebarItems: some View {
+        Label {
+            Text("System Hosts")
+        } icon: {
+            Image(systemName: "cpu")
+                .foregroundStyle(.blue)
+        }
+        .tag(SidebarItem.systemHosts)
+        Label("Base Hosts", systemImage: "lock.fill")
+            .tag(SidebarItem.baseHosts)
+        Section {
+            if !presentation.showsEmptyState {
+                ForEach(store.standaloneProfiles) { profile in
+                    sidebarProfileRow(
+                        profile,
+                        groupID: nil,
+                        index: store.standaloneProfiles.firstIndex(where: { $0.id == profile.id }) ?? 0
+                    )
+                }
+            }
+        } header: {
+            Text("Standalone Profiles")
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .modifier(sidebarDropTarget(.standaloneHeader))
+                .overlay {
+                    if sidebarDropFeedback == .profileContainer(nil) {
+                        containerDropIndicator
+                    }
+                }
+        }
+        ForEach(Array(store.groups.enumerated()), id: \.element.id) { groupIndex, group in
+            // Collapse is drawn by hand (conditional rows + own chevron): the native
+            // Section(isExpanded:) chevron fights the custom header's trailing
+            // controls and reflows them when collapsed.
+            Section {
+                if !collapsedGroups.contains(group.id) {
+                    ForEach(group.profiles) { profile in
                         sidebarProfileRow(
                             profile,
-                            groupID: nil,
-                            index: store.standaloneProfiles.firstIndex(where: { $0.id == profile.id }) ?? 0
+                            groupID: group.id,
+                            index: group.profiles.firstIndex(where: { $0.id == profile.id }) ?? 0
                         )
                     }
                 }
-            } header: {
-                Text("Standalone Profiles")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .modifier(sidebarDropTarget(.standaloneHeader))
-                    .overlay {
-                        if sidebarDropFeedback == .profileContainer(nil) {
-                            containerDropIndicator
-                        }
-                    }
-            }
-            ForEach(Array(store.groups.enumerated()), id: \.element.id) { groupIndex, group in
-                // Collapse is drawn by hand (conditional rows + own chevron): the native
-                // Section(isExpanded:) chevron fights the custom header's trailing
-                // controls and reflows them when collapsed.
-                Section {
-                    if !collapsedGroups.contains(group.id) {
-                        ForEach(group.profiles) { profile in
-                            sidebarProfileRow(
-                                profile,
-                                groupID: group.id,
-                                index: group.profiles.firstIndex(where: { $0.id == profile.id }) ?? 0
-                            )
-                        }
-                    }
-                    if sidebarDropFeedback == .group(group.id, .after) {
-                        insertionDropIndicator
-                    }
-                } header: {
-                    groupHeader(group, index: groupIndex)
+                if sidebarDropFeedback == .group(group.id, .after) {
+                    insertionDropIndicator
                 }
+            } header: {
+                groupHeader(group, index: groupIndex)
+            }
+        }
+    }
+
+    private var sidebar: some View {
+        List(selection: $selection) {
+            if isSearching {
+                searchResultRows
+            } else {
+                sidebarItems
             }
         }
         .listStyle(.sidebar)
+        .searchable(
+            text: $searchQuery, isPresented: $searchPresented, placement: .sidebar,
+            prompt: Text("Search")
+        )
+        .onReceive(NotificationCenter.default.publisher(for: .hostflipFindInAllProfiles)) { _ in
+            // A presented field can have lost focus, and re-presenting is a no-op for SwiftUI
+            // (macOS 15's searchFocused is out of reach), so focus the AppKit field directly.
+            guard searchPresented else {
+                searchPresented = true
+                return
+            }
+            if let window = NSApp.keyWindow, let field = window.contentView.flatMap(Self.findSearchField) {
+                window.makeFirstResponder(field)
+            }
+        }
+        .task(id: searchRequest) {
+            guard let request = searchRequest else {
+                searchResults = .empty
+                return
+            }
+            let results = await Task.detached(priority: .userInitiated) {
+                GlobalSearchResults(documents: request.documents, query: request.query)
+            }.value
+            guard !Task.isCancelled else { return }
+            searchResults = results
+        }
         .focused($sidebarHasFocus)
         .onKeyPress(.return) {
-            toggleSelectedProfileActivation() ? .handled : .ignored
+            // Result rows are buttons; Return must not toggle the profile selected underneath.
+            !isSearching && toggleSelectedProfileActivation() ? .handled : .ignored
         }
         .overlay {
-            if presentation.showsEmptyState {
+            if presentation.showsEmptyState, !isSearching {
                 sidebarEmptyState
                     .offset(y: 24)
             }
@@ -1024,7 +1154,8 @@ struct MainWindowView: View {
             // Read-only for Base Hosts and for Remote Profiles alike: the former only changes
             // through drift reconciliation, the latter only through Refresh (ADR-0012).
             isEditable: profile?.isRemote == false,
-            documentID: profileID.map { AnyHashable($0) } ?? AnyHashable("base-hosts")
+            documentID: profileID.map { AnyHashable($0) } ?? AnyHashable("base-hosts"),
+            reveal: editorReveal
         )
         // Read here, in a View body, so the focus change re-renders and reaches the Edit menu (#86).
         .focusedSceneValue(\.isHostsEditorEditable, HostsEditorFocus.shared.isEditableEditorFocused)

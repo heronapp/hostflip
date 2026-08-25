@@ -15,6 +15,9 @@ struct HostsEditor: NSViewRepresentable {
     /// system, which would flash a zero-sized editor for a frame); a change of identity resets
     /// the per-document view state: undo stack, selection, scroll position, and the find bar.
     var documentID: AnyHashable = "single-document"
+    /// A one-shot request to select and show a range (global search, #88); a new `id` fires
+    /// it again even for the same range.
+    var reveal: EditorReveal?
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = HostsTextView.scrollableTextView()
@@ -80,6 +83,12 @@ struct HostsEditor: NSViewRepresentable {
             textView.setSelectedRange(NSRange(location: 0, length: 0))
             textView.scroll(.zero)
         }
+        if let reveal, reveal.id != context.coordinator.revealedID {
+            context.coordinator.revealedID = reveal.id
+            let range = NSIntersectionRange(reveal.range, NSRange(location: 0, length: (textView.string as NSString).length))
+            textView.setSelectedRange(range)
+            textView.scrollRangeToVisible(range)
+        }
     }
 
     func makeCoordinator() -> Coordinator {
@@ -90,6 +99,7 @@ struct HostsEditor: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         var text: Binding<String>
         var documentID: AnyHashable
+        var revealedID: UUID?
         /// Dedicated undo manager so clearing it on a document switch cannot touch
         /// undo state registered elsewhere in the window (e.g. the name field).
         let textUndoManager = UndoManager()
@@ -136,6 +146,11 @@ struct HostsEditor: NSViewRepresentable {
         case .hostname: .systemTeal
         }
     }
+}
+
+struct EditorReveal: Equatable {
+    let id: UUID
+    let range: NSRange
 }
 
 /// Whether an editable hosts editor currently holds keyboard focus (#86). The text view
