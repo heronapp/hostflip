@@ -134,16 +134,15 @@ extension HostsSyntax {
         for line in lines {
             let isBlank = line.indentEnd == NSMaxRange(line.content)
             let indent = ns.substring(with: NSRange(location: line.content.location, length: line.indentEnd - line.content.location))
-            var body = ns.substring(with: NSRange(location: line.indentEnd, length: NSMaxRange(line.content) - line.indentEnd))
+            let bodyRange = NSRange(location: line.indentEnd, length: NSMaxRange(line.content) - line.indentEnd)
+            var body = ns.substring(with: bodyRange)
             var delta = 0
             if !isBlank {
                 if uncomment {
-                    body.removeFirst()
-                    delta = -1
-                    if body.utf16.first == space {
-                        body.removeFirst()
-                        delta = -2
-                    }
+                    // UTF-16 slicing, not Character removal: a combining mark after `#` must not go with it.
+                    let dropped = bodyRange.length > 1 && ns.character(at: line.indentEnd + 1) == space ? 2 : 1
+                    body = ns.substring(with: NSRange(location: line.indentEnd + dropped, length: bodyRange.length - dropped))
+                    delta = -dropped
                 } else {
                     body = "# " + body
                     delta = 2

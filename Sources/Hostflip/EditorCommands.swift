@@ -5,7 +5,7 @@ import SwiftUI
 /// `HostsTextView`. SwiftUI's Commands cannot validate through the responder chain, so the
 /// item follows the focus state the text view publishes.
 struct EditorCommands: Commands {
-    var focus = HostsEditorFocus.shared
+    private let focus = HostsEditorFocus.shared
 
     var body: some Commands {
         CommandGroup(after: .pasteboard) {

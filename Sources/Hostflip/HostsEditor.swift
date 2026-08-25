@@ -161,9 +161,11 @@ final class HostsEditorFocus {
 final class HostsTextView: NSTextView {
     override var isEditable: Bool {
         didSet {
-            if window?.firstResponder === self {
-                HostsEditorFocus.shared.set(isEditable)
-            }
+            // Flipped from updateNSView on an in-place document switch; publish outside the
+            // SwiftUI update pass.
+            guard window?.firstResponder === self else { return }
+            let editable = isEditable
+            DispatchQueue.main.async { HostsEditorFocus.shared.set(editable) }
         }
     }
 
@@ -196,11 +198,6 @@ final class HostsTextView: NSTextView {
         didChangeText()
         setSelectedRange(edit.selection)
         scrollRangeToVisible(edit.selection)
-    }
-
-    override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
-        if item.action == #selector(toggleComment(_:)) { return isEditable }
-        return super.validateUserInterfaceItem(item)
     }
 }
 

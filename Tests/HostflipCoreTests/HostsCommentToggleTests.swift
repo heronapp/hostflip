@@ -25,6 +25,8 @@ final class HostsCommentToggleTests: XCTestCase {
         XCTAssertEqual(toggle("#foo", 0)?.text, "foo")
         XCTAssertEqual(toggle("# foo", 0)?.text, "foo")
         XCTAssertEqual(toggle("#  foo", 0)?.text, " foo")
+        // The marker alone goes; a combining mark right after it stays with the text.
+        XCTAssertEqual(toggle("#\u{301}foo", 0)?.text, "\u{301}foo")
     }
 
     func testIndentationIsPreservedBothWays() throws {
