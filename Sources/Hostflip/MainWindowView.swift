@@ -831,6 +831,11 @@ struct MainWindowView: View {
             selection = .profile(profile.id)
             profilePendingNameFocus = profile.id
         }
+        Button("Duplicate Profile") {
+            guard let copyID = store.duplicateProfile(profile.id) else { return }
+            selection = .profile(copyID)
+            profilePendingNameFocus = copyID
+        }
         Button("Move Up") {
             store.moveProfile(profile.id, toGroup: groupID, at: index - 1)
         }

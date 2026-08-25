@@ -201,6 +201,67 @@ final class ActivationModelTests: XCTestCase {
         XCTAssertEqual(model.standaloneProfiles, [existing])
     }
 
+    func testDuplicatingAStandaloneProfileInsertsAnInactiveCopyRightAfterIt() throws {
+        let first = makeProfile("first")
+        let second = makeProfile("second")
+        var model = try makeModel(standaloneProfiles: [first, second])
+        try model.toggleProfile(first.id)
+
+        try model.duplicateProfile(first.id, as: .init("copy"), name: "First Copy")
+
+        XCTAssertEqual(
+            model.standaloneProfiles,
+            [first, Profile(id: .init("copy"), name: "First Copy", content: first.content), second]
+        )
+        XCTAssertEqual(model.activeProfileIDs, [first.id])
+    }
+
+    func testDuplicatingAGroupedProfileKeepsTheGroupsActiveProfile() throws {
+        let first = makeProfile("first")
+        let second = makeProfile("second")
+        var model = try makeModel(groups: [makeGroup("group", profiles: [first, second])])
+        try model.toggleProfile(first.id)
+
+        try model.duplicateProfile(first.id, as: .init("copy"), name: "First Copy")
+
+        XCTAssertEqual(model.standaloneProfiles, [])
+        XCTAssertEqual(
+            model.groups.first?.profiles,
+            [first, Profile(id: .init("copy"), name: "First Copy", content: first.content), second]
+        )
+        XCTAssertEqual(model.activeProfileIDs, [first.id])
+    }
+
+    func testDuplicatingARemoteProfileCopiesTheHeaderButNotTheRefreshState() throws {
+        var remote = makeRemoteProfile("remote")
+        remote.remoteRefreshState = RemoteRefreshState(lastSuccessAt: Date(timeIntervalSince1970: 100))
+        var model = try makeModel(standaloneProfiles: [remote])
+
+        try model.duplicateProfile(remote.id, as: .init("copy"), name: "Remote Copy")
+
+        let copy = try XCTUnwrap(model.profile(.init("copy")))
+        XCTAssertEqual(copy.content, remote.content)
+        XCTAssertEqual(copy.remoteHeader, remote.remoteHeader)
+        XCTAssertNil(copy.remoteRefreshState)
+    }
+
+    func testDuplicatingRejectsUnknownSourcesAndDuplicateIDsWithoutChangingState() throws {
+        let existing = makeProfile("existing")
+        var model = try makeModel(standaloneProfiles: [existing])
+
+        XCTAssertThrowsError(
+            try model.duplicateProfile(.init("missing"), as: .init("copy"), name: "Copy")
+        ) { error in
+            XCTAssertEqual(error as? ActivationModelError, .unknownProfile(.init("missing")))
+        }
+        XCTAssertThrowsError(
+            try model.duplicateProfile(existing.id, as: existing.id, name: "Copy")
+        ) { error in
+            XCTAssertEqual(error as? ActivationModelError, .duplicateProfileID(existing.id))
+        }
+        XCTAssertEqual(model.standaloneProfiles, [existing])
+    }
+
     func testAProfileCanBeRenamedAndItsContentEdited() throws {
         let staging = makeProfile("staging")
         var model = try makeModel(groups: [makeGroup("environment", profiles: [staging])])

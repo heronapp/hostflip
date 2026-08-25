@@ -54,8 +54,6 @@
 "New" = "新建";
 "New Profile" = "新建方案";
 "New Group" = "新建分组";
-"PROFILE_DEFAULT_NAME" = "新方案";
-"PROFILE_DEFAULT_NAME_NUMBERED" = "新方案 %lld";
 "GROUP_DEFAULT_NAME" = "新分组";
 "GROUP_DEFAULT_NAME_NUMBERED" = "新分组 %lld";
 "Group Name" = "分组名称";
@@ -64,6 +62,7 @@
 "Move Down" = "下移";
 "Delete Group…" = "删除分组…";
 "Rename Profile…" = "重命名方案…";
+"Duplicate Profile" = "复制方案";
 "Move To" = "移动到";
 "Delete Profile…" = "删除方案…";
 "Profile Actions" = "方案操作";

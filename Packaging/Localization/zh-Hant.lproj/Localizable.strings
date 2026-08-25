@@ -54,8 +54,6 @@
 "New" = "新增";
 "New Profile" = "新增方案";
 "New Group" = "新增群組";
-"PROFILE_DEFAULT_NAME" = "新方案";
-"PROFILE_DEFAULT_NAME_NUMBERED" = "新方案 %lld";
 "GROUP_DEFAULT_NAME" = "新群組";
 "GROUP_DEFAULT_NAME_NUMBERED" = "新群組 %lld";
 "Group Name" = "群組名稱";
@@ -64,6 +62,7 @@
 "Move Down" = "下移";
 "Delete Group…" = "刪除群組…";
 "Rename Profile…" = "重新命名方案…";
+"Duplicate Profile" = "複製方案";
 "Move To" = "移至";
 "Delete Profile…" = "刪除方案…";
 "Profile Actions" = "方案操作";

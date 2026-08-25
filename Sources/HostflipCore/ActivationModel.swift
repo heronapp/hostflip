@@ -136,6 +136,28 @@ public struct ActivationModel: Sendable {
         standaloneProfiles.append(Profile(id: id, name: name, content: content))
     }
 
+    /// Inserts a copy of the profile right after it in the same container. The copy takes the
+    /// original's content as is — a Remote Header stays, so a Remote Profile's copy is remote
+    /// too — but starts inactive and with no refresh history of its own.
+    public mutating func duplicateProfile(_ profileID: Profile.ID, as newID: Profile.ID, name: String) throws {
+        guard !allProfiles.contains(where: { $0.id == newID }) else {
+            throw ActivationModelError.duplicateProfileID(newID)
+        }
+        if let index = standaloneProfiles.firstIndex(where: { $0.id == profileID }) {
+            let copy = Profile(id: newID, name: name, content: standaloneProfiles[index].content)
+            standaloneProfiles.insert(copy, at: index + 1)
+            return
+        }
+        for groupIndex in groups.indices {
+            if let index = groups[groupIndex].profiles.firstIndex(where: { $0.id == profileID }) {
+                let copy = Profile(id: newID, name: name, content: groups[groupIndex].profiles[index].content)
+                groups[groupIndex].profiles.insert(copy, at: index + 1)
+                return
+            }
+        }
+        throw ActivationModelError.unknownProfile(profileID)
+    }
+
     public mutating func renameProfile(_ profileID: Profile.ID, to name: String) throws {
         try mutateProfile(profileID) { $0.name = name }
     }
