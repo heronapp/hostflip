@@ -293,3 +293,6 @@
 "Save" = "保存";
 "The profile was changed outside this dialog." = "このダイアログの外でプロファイルが変更されました。";
 "The profile is no longer a remote profile." = "このプロファイルはリモートプロファイルではなくなっています。";
+
+/* Editor */
+"Toggle Comment" = "コメントを切り替え";

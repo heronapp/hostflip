@@ -88,6 +88,7 @@ struct HostflipApp: App {
         .commands {
             ImportExportCommands(store: store)
             RemoteRefreshCommands(store: store)
+            EditorCommands()
         }
 
         Settings {
