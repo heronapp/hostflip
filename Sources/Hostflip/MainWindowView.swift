@@ -185,6 +185,9 @@ struct MainWindowView: View {
     @State private var searchQuery = ""
     @State private var searchPresented = false
     @State private var editorReveal: EditorReveal?
+    /// Computed off the main thread per (query, documents): a keystroke must not rescan a
+    /// 90k-line Remote Profile synchronously (#94 scale).
+    @State private var searchResults = GlobalSearchResults.empty
     /// The profile pending deletion confirmation; a non-nil value shows the confirmation dialog.
     @State private var profilePendingDeletion: Profile?
     @State private var profilePendingNameFocus: Profile.ID?
@@ -371,7 +374,9 @@ struct MainWindowView: View {
         !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    private var searchResults: GlobalSearchResults {
+    /// Every searchable document in sidebar order; System Hosts is the merge output, so its
+    /// hits are already attributable to one of these.
+    private var searchDocuments: [GlobalSearchResults.Document] {
         var documents = [GlobalSearchResults.Document(
             item: .baseHosts, name: String(localized: "Base Hosts"), content: store.baseHostsContent, isActive: nil
         )]
@@ -379,7 +384,16 @@ struct MainWindowView: View {
         documents += profiles.map {
             GlobalSearchResults.Document(item: .profile($0.id), name: $0.name, content: $0.content, isActive: store.isActive($0.id))
         }
-        return GlobalSearchResults(documents: documents, query: searchQuery)
+        return documents
+    }
+
+    private struct SearchRequest: Equatable {
+        let query: String
+        let documents: [GlobalSearchResults.Document]
+    }
+
+    private var searchRequest: SearchRequest? {
+        isSearching ? SearchRequest(query: searchQuery, documents: searchDocuments) : nil
     }
 
     /// Jumps to the matching line: the shared editor swaps the document, then reveals the range.
@@ -391,7 +405,7 @@ struct MainWindowView: View {
     @ViewBuilder
     private var searchResultRows: some View {
         let results = searchResults
-        if results.results.isEmpty {
+        if results.results.isEmpty, results.query == searchQuery.trimmingCharacters(in: .whitespacesAndNewlines) {
             Text("No Matches")
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .center)
@@ -433,57 +447,57 @@ struct MainWindowView: View {
 
     @ViewBuilder
     private var sidebarItems: some View {
-            Label {
-                Text("System Hosts")
-            } icon: {
-                Image(systemName: "cpu")
-                    .foregroundStyle(.blue)
+        Label {
+            Text("System Hosts")
+        } icon: {
+            Image(systemName: "cpu")
+                .foregroundStyle(.blue)
+        }
+        .tag(SidebarItem.systemHosts)
+        Label("Base Hosts", systemImage: "lock.fill")
+            .tag(SidebarItem.baseHosts)
+        Section {
+            if !presentation.showsEmptyState {
+                ForEach(store.standaloneProfiles) { profile in
+                    sidebarProfileRow(
+                        profile,
+                        groupID: nil,
+                        index: store.standaloneProfiles.firstIndex(where: { $0.id == profile.id }) ?? 0
+                    )
+                }
             }
-            .tag(SidebarItem.systemHosts)
-            Label("Base Hosts", systemImage: "lock.fill")
-                .tag(SidebarItem.baseHosts)
+        } header: {
+            Text("Standalone Profiles")
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .modifier(sidebarDropTarget(.standaloneHeader))
+                .overlay {
+                    if sidebarDropFeedback == .profileContainer(nil) {
+                        containerDropIndicator
+                    }
+                }
+        }
+        ForEach(Array(store.groups.enumerated()), id: \.element.id) { groupIndex, group in
+            // Collapse is drawn by hand (conditional rows + own chevron): the native
+            // Section(isExpanded:) chevron fights the custom header's trailing
+            // controls and reflows them when collapsed.
             Section {
-                if !presentation.showsEmptyState {
-                    ForEach(store.standaloneProfiles) { profile in
+                if !collapsedGroups.contains(group.id) {
+                    ForEach(group.profiles) { profile in
                         sidebarProfileRow(
                             profile,
-                            groupID: nil,
-                            index: store.standaloneProfiles.firstIndex(where: { $0.id == profile.id }) ?? 0
+                            groupID: group.id,
+                            index: group.profiles.firstIndex(where: { $0.id == profile.id }) ?? 0
                         )
                     }
                 }
-            } header: {
-                Text("Standalone Profiles")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .modifier(sidebarDropTarget(.standaloneHeader))
-                    .overlay {
-                        if sidebarDropFeedback == .profileContainer(nil) {
-                            containerDropIndicator
-                        }
-                    }
-            }
-            ForEach(Array(store.groups.enumerated()), id: \.element.id) { groupIndex, group in
-                // Collapse is drawn by hand (conditional rows + own chevron): the native
-                // Section(isExpanded:) chevron fights the custom header's trailing
-                // controls and reflows them when collapsed.
-                Section {
-                    if !collapsedGroups.contains(group.id) {
-                        ForEach(group.profiles) { profile in
-                            sidebarProfileRow(
-                                profile,
-                                groupID: group.id,
-                                index: group.profiles.firstIndex(where: { $0.id == profile.id }) ?? 0
-                            )
-                        }
-                    }
-                    if sidebarDropFeedback == .group(group.id, .after) {
-                        insertionDropIndicator
-                    }
-                } header: {
-                    groupHeader(group, index: groupIndex)
+                if sidebarDropFeedback == .group(group.id, .after) {
+                    insertionDropIndicator
                 }
+            } header: {
+                groupHeader(group, index: groupIndex)
             }
+        }
     }
 
     private var sidebar: some View {
@@ -502,9 +516,21 @@ struct MainWindowView: View {
         .onReceive(NotificationCenter.default.publisher(for: .hostflipFindInAllProfiles)) { _ in
             searchPresented = true
         }
+        .task(id: searchRequest) {
+            guard let request = searchRequest else {
+                searchResults = .empty
+                return
+            }
+            let results = await Task.detached(priority: .userInitiated) {
+                GlobalSearchResults(documents: request.documents, query: request.query)
+            }.value
+            guard !Task.isCancelled else { return }
+            searchResults = results
+        }
         .focused($sidebarHasFocus)
         .onKeyPress(.return) {
-            toggleSelectedProfileActivation() ? .handled : .ignored
+            // Result rows are buttons; Return must not toggle the profile selected underneath.
+            !isSearching && toggleSelectedProfileActivation() ? .handled : .ignored
         }
         .overlay {
             if presentation.showsEmptyState, !isSearching {

@@ -29,7 +29,7 @@ public enum HostsSearch {
             options: [.byLines, .substringNotRequired]
         ) { _, lineRange, _, _ in
             lineNumber += 1
-            let found = ns.range(of: needle, options: [.caseInsensitive, .diacriticInsensitive], range: lineRange)
+            let found = ns.range(of: needle, options: [.caseInsensitive], range: lineRange)
             guard found.location != NSNotFound else { return }
             hits.append(Hit(line: lineNumber, lineRange: lineRange, matchRange: found))
         }

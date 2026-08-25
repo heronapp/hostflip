@@ -49,6 +49,16 @@ final class GlobalSearchResultsTests: XCTestCase {
         XCTAssertEqual(match.lineText, "10.0.0.1\t\t  api.test   # dev")
     }
 
+    func testFoldingNeverSplitsASurrogatePair() {
+        let doc = GlobalSearchResults.Document(
+            item: .profile(Profile.ID("x")), name: "x", content: "# 🚀🚀🚀🚀🚀🚀🚀🚀 launch api.test", isActive: false
+        )
+        let match = GlobalSearchResults(documents: [doc], query: "api").results[0].matches[0]
+        XCTAssertTrue(match.displayText.hasPrefix("…"))
+        XCTAssertFalse(match.displayText.unicodeScalars.contains { $0.value == 0xFFFD })
+        XCTAssertTrue(match.displayText.hasSuffix("api.test"))
+    }
+
     func testBlankQueryYieldsNothing() {
         XCTAssertTrue(GlobalSearchResults(documents: [base, dev], query: "  ").results.isEmpty)
     }

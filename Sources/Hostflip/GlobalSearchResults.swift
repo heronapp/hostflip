@@ -28,7 +28,10 @@ struct GlobalSearchResults: Equatable {
             self.lineText = lineText
             var shown = lineText
             if matchOffsetInLine > Self.foldThreshold {
-                shown = "…" + (lineText as NSString).substring(from: max(0, matchOffsetInLine - Self.contextLength))
+                let ns = lineText as NSString
+                // Snap to a character boundary so the fold never splits a surrogate pair.
+                let start = ns.rangeOfComposedCharacterSequence(at: matchOffsetInLine - Self.contextLength).location
+                shown = "…" + ns.substring(from: start)
             }
             // Column alignment whitespace is noise in a one-line row.
             displayText = shown.split(whereSeparator: \.isWhitespace).joined(separator: " ")
@@ -41,10 +44,15 @@ struct GlobalSearchResults: Equatable {
         var id: MainWindowView.SidebarItem { document.item }
     }
 
+    /// The trimmed query these results answer.
+    let query: String
     let results: [DocumentResult]
     var matchCount: Int { results.reduce(0) { $0 + $1.matches.count } }
 
+    static let empty = GlobalSearchResults(documents: [], query: "")
+
     init(documents: [Document], query: String) {
+        self.query = query.trimmingCharacters(in: .whitespacesAndNewlines)
         results = documents.compactMap { document in
             let hits = HostsSearch.matches(in: document.content, query: query)
             guard !hits.isEmpty else { return nil }
