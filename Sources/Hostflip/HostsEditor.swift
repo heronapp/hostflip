@@ -266,20 +266,21 @@ final class HostsLineNumberRulerView: NSRulerView {
         needsDisplay = true
     }
 
-    /// Finds newlines on the storage's mutable string proxy — UTF-16 search, no String bridge.
+    /// Walks the storage's mutable string proxy with NSString's line API — UTF-16, no String
+    /// bridge, and the same line breaks as HostsSyntax (.byLines) and TextKit 2 paragraphs,
+    /// so a bare CR counts as a line here too.
     private func rebuildLineStarts() {
         guard let storage = textView?.textStorage else { return }
         let string = storage.mutableString
         var starts = [0]
-        var searchRange = NSRange(location: 0, length: string.length)
-        while true {
-            let found = string.range(of: "\n", options: [.literal], range: searchRange)
-            if found.location == NSNotFound { break }
-            starts.append(NSMaxRange(found))
-            searchRange = NSRange(
-                location: NSMaxRange(found),
-                length: string.length - NSMaxRange(found)
-            )
+        var position = 0
+        while position < string.length {
+            var end = 0, contentsEnd = 0
+            string.getLineStart(nil, end: &end, contentsEnd: &contentsEnd, for: NSRange(location: position, length: 0))
+            if contentsEnd < end { // a terminator opens the next line, even an empty trailing one
+                starts.append(end)
+            }
+            position = end
         }
         lineStarts = starts
         // Bridges the document once per character edit — the same order of work as the

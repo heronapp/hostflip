@@ -26,6 +26,9 @@ final class HostsLineNumberRulerViewTests: XCTestCase {
         XCTAssertEqual(makeRuler("").2.lineCount, 1)
         XCTAssertEqual(makeRuler("a\nb").2.lineCount, 2)
         XCTAssertEqual(makeRuler("a\nb\n").2.lineCount, 3)
+        // Every terminator TextKit 2 and HostsSyntax split on counts, not only LF.
+        XCTAssertEqual(makeRuler("a\rb\r\nc\u{2028}d").2.lineStarts, [0, 2, 5, 7])
+        XCTAssertEqual(makeRuler("a\r").2.lineStarts, [0, 2])
     }
 
     /// The bounds observer only marks the ruler dirty; it never touches the storage.
