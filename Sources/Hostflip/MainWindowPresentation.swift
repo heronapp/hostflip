@@ -31,15 +31,9 @@ struct MainWindowPresentation: Equatable {
         profileCount: Int,
         isSwitching: Bool
     ) {
-        // A needsApproval verdict is only as current as the helper status: once the
-        // helper leaves requiresApproval (approved in System Settings, or re-registered)
-        // the feedback is stale and must not outrank the steady-state banner. An unknown
-        // status keeps it — the switch just reported the helper needs approval.
-        let approvalFeedbackIsStale = switchFeedback == .needsApproval
-            && helperStatus != nil && helperStatus != .requiresApproval
         if hasHostsDrift || switchFeedback == .hostsDrift {
             self.banner = .hostsDrift
-        } else if let switchFeedback, switchFeedback != .merged, !approvalFeedbackIsStale {
+        } else if let switchFeedback, switchFeedback != .merged {
             self.banner = .switchFeedback(switchFeedback)
         } else if let backgroundSyncError {
             self.banner = .backgroundSyncError(backgroundSyncError)

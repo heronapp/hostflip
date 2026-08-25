@@ -34,7 +34,12 @@ enum MaintenanceFeedback: Equatable {
 @MainActor
 @Observable
 final class MaintenanceStore {
-    private(set) var helperStatus: DaemonRegistrationStatus?
+    private(set) var helperStatus: DaemonRegistrationStatus? {
+        didSet { if let helperStatus { helperStatusChanged?(helperStatus) } }
+    }
+    /// Forwards every status read to the workspace store, which retires switch feedback the
+    /// status has overtaken; wired at launch, nil in tests that exercise this store alone.
+    @ObservationIgnored var helperStatusChanged: ((DaemonRegistrationStatus) -> Void)?
     private(set) var feedback: MaintenanceFeedback?
     private(set) var isRemovingHelper = false
 

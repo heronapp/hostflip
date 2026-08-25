@@ -69,50 +69,6 @@ final class MainWindowPresentationTests: XCTestCase {
         XCTAssertFalse(presentation.activationControlsDisabled)
     }
 
-    func testApprovalFeedbackIsRetiredOnceTheHelperIsApproved() {
-        let presentation = MainWindowPresentation(
-            isPaused: false,
-            hasHostsDrift: false,
-            helperStatus: .enabled,
-            switchFeedback: .needsApproval,
-            backgroundSyncError: nil,
-            profileCount: 2,
-            isSwitching: false
-        )
-
-        XCTAssertNil(presentation.banner)
-    }
-
-    func testApprovalFeedbackStaysWhileApprovalIsPendingOrStatusIsUnknown() {
-        for helperStatus in [DaemonRegistrationStatus.requiresApproval, nil] {
-            let presentation = MainWindowPresentation(
-                isPaused: false,
-                hasHostsDrift: false,
-                helperStatus: helperStatus,
-                switchFeedback: .needsApproval,
-                backgroundSyncError: nil,
-                profileCount: 2,
-                isSwitching: false
-            )
-
-            XCTAssertEqual(presentation.banner, .switchFeedback(.needsApproval), "helperStatus: \(String(describing: helperStatus))")
-        }
-    }
-
-    func testStaleApprovalFeedbackDoesNotHideOtherSwitchFeedback() {
-        let presentation = MainWindowPresentation(
-            isPaused: false,
-            hasHostsDrift: false,
-            helperStatus: .enabled,
-            switchFeedback: .unavailable,
-            backgroundSyncError: nil,
-            profileCount: 2,
-            isSwitching: false
-        )
-
-        XCTAssertEqual(presentation.banner, .switchFeedback(.unavailable))
-    }
-
     func testEmptyWorkspaceShowsCreationStateWithoutAWarningBanner() {
         let presentation = MainWindowPresentation(
             isPaused: false,
