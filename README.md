@@ -26,7 +26,7 @@ Most hosts managers treat `/etc/hosts` as their own: every save rewrites the who
 
 ## Install
 
-Requires macOS 14 or later on Apple silicon.
+Requires macOS 14 or later on Apple silicon. Intel builds are not planned unless there is demand — if you need one, [open an issue](https://github.com/heronapp/hostflip/issues/new?title=Intel%20support).
 
 **Homebrew**
 
