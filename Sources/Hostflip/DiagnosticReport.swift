@@ -41,20 +41,22 @@ enum DiagnosticReport {
 
     /// The lines the bug form's Environment field asks for; also the head of the full report.
     static func environment(for snapshot: DiagnosticSnapshot) -> String {
-        """
-        hostflip \(snapshot.appVersion) (\(snapshot.build))
-        macOS: \(snapshot.macOSVersion) (\(snapshot.architecture))
-        Install source: \(label(snapshot.installSource))
-        Helper: \(snapshot.helperStatus?.rawValue ?? "unknown")
-        """
+        environmentLines(for: snapshot).joined(separator: "\n")
     }
 
-    static func text(for snapshot: DiagnosticSnapshot) -> String {
-        var lines = [
-            "hostflip \(snapshot.appVersion) (\(snapshot.build)) diagnostic report",
+    private static func environmentLines(for snapshot: DiagnosticSnapshot) -> [String] {
+        [
+            "hostflip \(snapshot.appVersion) (\(snapshot.build))",
             "macOS: \(snapshot.macOSVersion) (\(snapshot.architecture))",
             "Install source: \(label(snapshot.installSource))",
             "Helper: \(snapshot.helperStatus?.rawValue ?? "unknown")",
+        ]
+    }
+
+    static func text(for snapshot: DiagnosticSnapshot) -> String {
+        var lines = environmentLines(for: snapshot)
+        lines[0] += " diagnostic report" // the heading line makes a pasted block recognisable
+        lines += [
             "Paused: \(yesNo(snapshot.isPaused))",
             "Hosts drift detected: \(yesNo(snapshot.hasHostsDrift))",
             "Groups: \(snapshot.groupCount)",

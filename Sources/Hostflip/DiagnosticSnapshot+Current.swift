@@ -17,7 +17,7 @@ extension DiagnosticSnapshot {
             build: info["CFBundleVersion"] as? String ?? "unknown",
             macOSVersion: "\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)",
             architecture: architecture,
-            installSource: installSource(bundleURL: Bundle.main.bundleURL),
+            installSource: installSource(),
             helperStatus: maintenanceStore.helperStatus,
             isPaused: store.isPaused,
             hasHostsDrift: store.hasHostsDrift,
@@ -41,17 +41,14 @@ extension DiagnosticSnapshot {
         #endif
     }
 
-    /// Best effort: the cask installs into /Applications and leaves its Caskroom entry behind;
-    /// anything else counts as a direct download.
+    /// Best effort: the cask leaves its Caskroom entry behind (Apple silicon and Intel
+    /// prefixes). The app's own location is not consulted — `brew --appdir` can put it
+    /// anywhere — so anything without an entry counts as a direct download.
     static let caskrooms = ["/opt/homebrew/Caskroom/hostflip", "/usr/local/Caskroom/hostflip"]
 
     static func installSource(
-        bundleURL: URL, caskrooms: [String] = caskrooms, fileManager: FileManager = .default
+        caskrooms: [String] = caskrooms, fileManager: FileManager = .default
     ) -> InstallSource {
-        let inApplications = bundleURL.deletingLastPathComponent().path == "/Applications"
-        if inApplications, caskrooms.contains(where: { fileManager.fileExists(atPath: $0) }) {
-            return .homebrewCask
-        }
-        return .direct
+        caskrooms.contains(where: { fileManager.fileExists(atPath: $0) }) ? .homebrewCask : .direct
     }
 }
