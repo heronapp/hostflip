@@ -36,17 +36,13 @@ struct HostsEditor: NSViewRepresentable {
         textView.isAutomaticLinkDetectionEnabled = false
         textView.smartInsertDeleteEnabled = false
         textView.textContainerInset = NSSize(width: 4, height: 8)
-        // hosts is a line-oriented format; with soft wrapping off, gutter line numbers always match file lines.
-        textView.isHorizontallyResizable = true
-        textView.textContainer?.widthTracksTextView = false
-        textView.textContainer?.containerSize = NSSize(
-            width: CGFloat.greatestFiniteMagnitude,
-            height: CGFloat.greatestFiniteMagnitude
-        )
+        // Soft wrapping stays on (the scrollableTextView default): with widthTracksTextView off,
+        // TextKit 2 lays out the whole document up front instead of the viewport — seconds and a
+        // 4x per-scroll cost on a 90k-line Remote Profile (#94). The gutter maps wrapped rows
+        // back to file lines through the layout fragments.
         textView.delegate = context.coordinator
         textView.string = text
         Self.highlight(textView)
-        scrollView.hasHorizontalScroller = true
         scrollView.contentView.postsBoundsChangedNotifications = true
         scrollView.verticalRulerView = HostsLineNumberRulerView(
             scrollView: scrollView,
@@ -210,17 +206,20 @@ final class HostsTextView: NSTextView {
     }
 }
 
-/// Never reads NSTextView.layoutManager, to avoid downgrading the main editor from TextKit 2.
-/// The editor does not soft-wrap, so a fixed line-height font can locate visible logical lines directly.
+/// Never reads NSTextView.layoutManager, to avoid downgrading the main editor from TextKit 2;
+/// it walks the TextKit 2 layout fragments of the visible rows instead. A fragment is one
+/// paragraph, i.e. one file line, so a wrapped line gets its number on its first row only.
 @MainActor
 final class HostsLineNumberRulerView: NSRulerView {
     private weak var textView: NSTextView?
-    /// Cached: the draw runs on every scroll tick, and deriving the count there would copy and
-    /// scan the whole document per frame (#94). Recomputed only when characters change — observed
-    /// on the storage rather than through NSText.didChangeNotification, which undo does not post.
-    /// Read-only in didProcessEditing: the attribute-merging hazard noted at the top of the file
-    /// only concerns mutating the storage from there.
-    private(set) var lineCount = 1
+    /// UTF-16 offsets at which each file line starts. Cached: the draw runs on every scroll
+    /// tick, and deriving this there would copy and scan the whole document per frame (#94).
+    /// Recomputed only when characters change — observed on the storage rather than through
+    /// NSText.didChangeNotification, which undo does not post. Read-only in didProcessEditing:
+    /// the attribute-merging hazard noted at the top of the file only concerns mutating the
+    /// storage from there.
+    private(set) var lineStarts: [Int] = [0]
+    var lineCount: Int { lineStarts.count }
 
     init(scrollView: NSScrollView, textView: NSTextView) {
         self.textView = textView
@@ -259,22 +258,32 @@ final class HostsLineNumberRulerView: NSRulerView {
         needsDisplay = true
     }
 
-    /// Counts newlines on the storage's mutable string proxy — UTF-16 search, no String bridge.
+    /// Finds newlines on the storage's mutable string proxy — UTF-16 search, no String bridge.
     private func recountLines() {
         guard let storage = textView?.textStorage else { return }
         let string = storage.mutableString
-        var count = 1
+        var starts = [0]
         var searchRange = NSRange(location: 0, length: string.length)
         while true {
             let found = string.range(of: "\n", options: [.literal], range: searchRange)
             if found.location == NSNotFound { break }
-            count += 1
+            starts.append(NSMaxRange(found))
             searchRange = NSRange(
                 location: NSMaxRange(found),
                 length: string.length - NSMaxRange(found)
             )
         }
-        lineCount = count
+        lineStarts = starts
+    }
+
+    /// 1-based number of the file line containing the UTF-16 offset.
+    func lineNumber(at offset: Int) -> Int {
+        var low = 0, high = lineStarts.count - 1
+        while low < high {
+            let mid = (low + high + 1) / 2
+            if lineStarts[mid] <= offset { low = mid } else { high = mid - 1 }
+        }
+        return low + 1
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -288,23 +297,16 @@ final class HostsLineNumberRulerView: NSRulerView {
     }
 
     override func drawHashMarksAndLabels(in rect: NSRect) {
-        guard let textView, let font = textView.font else { return }
+        guard let textView,
+              let layoutManager = textView.textLayoutManager,
+              let contentManager = layoutManager.textContentManager
+        else { return }
 
         let digits = max(2, String(lineCount).count)
         let desiredThickness = max(40, CGFloat(digits * 8 + 16))
         if ruleThickness != desiredThickness {
             ruleThickness = desiredThickness
         }
-
-        let lineHeight = ceil(font.ascender - font.descender + font.leading)
-        let inset = textView.textContainerInset.height
-        let visibleRect = textView.visibleRect
-        let firstLine = max(0, Int(floor((visibleRect.minY - inset) / lineHeight)))
-        let lastLine = min(
-            lineCount - 1,
-            Int(ceil((visibleRect.maxY - inset) / lineHeight))
-        )
-        guard firstLine <= lastLine else { return }
 
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.alignment = .right
@@ -313,20 +315,47 @@ final class HostsLineNumberRulerView: NSRulerView {
             .foregroundColor: NSColor.tertiaryLabelColor,
             .paragraphStyle: paragraphStyle,
         ]
+        let origin = textView.textContainerOrigin
+        let visibleRect = textView.visibleRect
+        let documentStart = contentManager.documentRange.location
 
-        for lineIndex in firstLine...lastLine {
-            let point = convert(
-                NSPoint(x: 0, y: inset + CGFloat(lineIndex) * lineHeight),
-                from: textView
-            )
-            let labelRect = NSRect(
-                x: 4,
-                y: point.y,
-                width: bounds.width - 10,
-                height: lineHeight
-            )
-            String(lineIndex + 1).draw(in: labelRect, withAttributes: attributes)
+        // Fragment frames are in text container coordinates; the ruler draws in its own.
+        func draw(_ number: Int, rowFrame: NSRect) {
+            let point = convert(NSPoint(x: 0, y: rowFrame.minY + origin.y), from: textView)
+            let labelRect = NSRect(x: 4, y: point.y, width: bounds.width - 10, height: rowFrame.height)
+            String(number).draw(in: labelRect, withAttributes: attributes)
         }
 
+        // Walk only what the viewport controller has already laid out: asking for layout from
+        // here (ensuresLayout / textLayoutFragment(for:)) cancels TextKit 2's idle estimation
+        // of the document height, and the view then cannot scroll past the first screen.
+        guard let viewport = layoutManager.textViewportLayoutController.viewportRange else { return }
+        var lastFragment: NSTextLayoutFragment?
+        layoutManager.enumerateTextLayoutFragments(from: viewport.location, options: []) { fragment in
+            let frame = fragment.layoutFragmentFrame
+            guard frame.minY + origin.y < visibleRect.maxY,
+                  fragment.rangeInElement.location.compare(viewport.endLocation) == .orderedAscending
+            else { return false }
+            guard frame.maxY + origin.y > visibleRect.minY else { return true }
+            let offset = contentManager.offset(from: documentStart, to: fragment.rangeInElement.location)
+            // Only the first row of a wrapped line carries the number.
+            let firstRow = fragment.textLineFragments.first?.typographicBounds
+                ?? NSRect(origin: .zero, size: frame.size)
+            draw(lineNumber(at: offset), rowFrame: NSRect(x: 0, y: frame.minY, width: 0, height: firstRow.height))
+            lastFragment = fragment
+            return true
+        }
+
+        // A trailing newline opens an empty last line; TextKit 2 renders it as an extra line
+        // fragment inside the last layout fragment rather than as a fragment of its own.
+        if let lastFragment, let storage = textView.textStorage,
+           storage.length > 0, storage.mutableString.hasSuffix("\n"),
+           contentManager.offset(from: documentStart, to: lastFragment.rangeInElement.endLocation) == storage.length,
+           let emptyRow = lastFragment.textLineFragments.last?.typographicBounds {
+            let frame = lastFragment.layoutFragmentFrame
+            if frame.minY + emptyRow.minY + origin.y < visibleRect.maxY {
+                draw(lineCount, rowFrame: NSRect(x: 0, y: frame.minY + emptyRow.minY, width: 0, height: emptyRow.height))
+            }
+        }
     }
 }

@@ -67,3 +67,16 @@ final class HostsLineNumberRulerViewTests: XCTestCase {
         XCTAssertEqual(ruler.lineCount, 1)
     }
 }
+
+extension HostsLineNumberRulerViewTests {
+    func testLineNumberAtOffsetFollowsLineStarts() {
+        let (_, _, ruler) = makeRuler("ab\ncd\n\nef")
+        XCTAssertEqual(ruler.lineStarts, [0, 3, 6, 7])
+        XCTAssertEqual(ruler.lineNumber(at: 0), 1)
+        XCTAssertEqual(ruler.lineNumber(at: 2), 1)
+        XCTAssertEqual(ruler.lineNumber(at: 3), 2)
+        XCTAssertEqual(ruler.lineNumber(at: 6), 3)
+        XCTAssertEqual(ruler.lineNumber(at: 7), 4)
+        XCTAssertEqual(ruler.lineNumber(at: 9), 4)
+    }
+}
