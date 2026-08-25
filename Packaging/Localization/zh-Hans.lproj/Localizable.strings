@@ -303,3 +303,4 @@
 "Find in All Profiles…" = "在所有方案中查找…";
 "No Matches" = "无匹配项";
 "Line %lld" = "第 %lld 行";
+"%lld more matches not shown" = "还有 %lld 条匹配未显示";

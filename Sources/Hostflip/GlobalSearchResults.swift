@@ -40,9 +40,14 @@ struct GlobalSearchResults: Equatable {
 
     struct DocumentResult: Equatable, Identifiable {
         let document: Document
+        /// At most `matchLimit` rows: a one-letter query hits tens of thousands of lines in a
+        /// big Remote Profile, and diffing that many rows per keystroke froze typing.
         let matches: [Match]
+        let hiddenMatchCount: Int
         var id: MainWindowView.SidebarItem { document.item }
     }
+
+    static let matchLimit = 100
 
     /// The trimmed query these results answer.
     let query: String
@@ -56,14 +61,16 @@ struct GlobalSearchResults: Equatable {
             let hits = HostsSearch.matches(in: document.content, query: query)
             guard !hits.isEmpty else { return nil }
             let ns = document.content as NSString
-            return DocumentResult(document: document, matches: hits.map { hit in
+            let shown = hits.prefix(Self.matchLimit)
+            let matches = shown.map { hit -> Match in
                 let raw = ns.substring(with: hit.lineRange) as NSString
                 let firstNonBlank = raw.rangeOfCharacter(from: CharacterSet.whitespaces.inverted).location
                 let leading = firstNonBlank == NSNotFound ? 0 : firstNonBlank
                 let lineText = raw.trimmingCharacters(in: .whitespaces)
                 let matchOffset = hit.matchRange.location - hit.lineRange.location - leading
                 return Match(hit: hit, lineText: lineText, matchOffsetInLine: matchOffset)
-            })
+            }
+            return DocumentResult(document: document, matches: matches, hiddenMatchCount: hits.count - shown.count)
         }
     }
 }

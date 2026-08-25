@@ -58,6 +58,15 @@ final class GlobalSearchResultsTests: XCTestCase {
         XCTAssertTrue(match.displayText.hasSuffix("api.test"))
     }
 
+    func testMatchesAreCappedPerDocumentWithTheRestCounted() {
+        let content = (1...250).map { "0.0.0.0 host\($0).example" }.joined(separator: "\n")
+        let doc = GlobalSearchResults.Document(item: .profile(Profile.ID("x")), name: "x", content: content, isActive: false)
+        let result = GlobalSearchResults(documents: [doc], query: "host").results[0]
+        XCTAssertEqual(result.matches.count, GlobalSearchResults.matchLimit)
+        XCTAssertEqual(result.matches.last?.hit.line, GlobalSearchResults.matchLimit)
+        XCTAssertEqual(result.hiddenMatchCount, 250 - GlobalSearchResults.matchLimit)
+    }
+
     func testBlankQueryYieldsNothing() {
         XCTAssertTrue(GlobalSearchResults(documents: [base, dev], query: "  ").results.isEmpty)
     }

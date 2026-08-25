@@ -440,6 +440,11 @@ struct MainWindowView: View {
                     }
                     .buttonStyle(.plain)
                 }
+                if result.hiddenMatchCount > 0 {
+                    Text("\(result.hiddenMatchCount) more matches not shown")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             } header: {
                 HStack(spacing: 6) {
                     Text(result.document.name)

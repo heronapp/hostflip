@@ -303,3 +303,4 @@
 "Find in All Profiles…" = "在所有方案中尋找…";
 "No Matches" = "沒有相符項目";
 "Line %lld" = "第 %lld 行";
+"%lld more matches not shown" = "還有 %lld 筆相符項目未顯示";
