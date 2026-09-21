@@ -1471,6 +1471,7 @@ private struct HostsDriftReviewSheet: View {
                     store.reconcileHosts(.later)
                     dismiss()
                 }
+                .disabled(store.isReconciling)
                 Button("Use System Hosts as Base…", role: .destructive) {
                     isConfirmingUseSystemHostsAsBase = true
                 }
