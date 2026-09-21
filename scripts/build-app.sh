@@ -14,7 +14,23 @@ IDENTITY="${CODESIGN_IDENTITY:--}"
 BIN="$(swift build -c release --show-bin-path)"
 APP="build/Hostflip.app"
 
-swift build -c release
+# SwiftPM's Swift Build backend (the default since Swift 6.4) links through clang with
+# --sysroot and no SDKROOT, which leaves clang unable to tell the SDK version: it then
+# records the deployment target (14.0) as the SDK in LC_BUILD_VERSION. macOS keys the
+# window design on that field, so the app would launch in the pre-macOS 26 compatibility
+# look. An explicit -isysroot lets clang read the version from the SDK again; it is
+# redundant but harmless on toolchains that already get this right.
+SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
+swift build -c release \
+    -Xswiftc -Xclang-linker -Xswiftc -isysroot \
+    -Xswiftc -Xclang-linker -Xswiftc "$SDK_PATH"
+
+SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
+LINKED_SDK="$(vtool -show-build "$BIN/HostflipApp" | awk '$1 == "sdk" { print $2 }')"
+if [ "$LINKED_SDK" != "$SDK_VERSION" ]; then
+    echo "HostflipApp records SDK ${LINKED_SDK}, expected ${SDK_VERSION}: the app would get the compatibility look" >&2
+    exit 1
+fi
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Library/LaunchDaemons" \
