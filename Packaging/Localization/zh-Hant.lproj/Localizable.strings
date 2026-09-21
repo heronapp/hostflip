@@ -138,6 +138,7 @@
 "Switch blocked: system hosts contains changes made outside hostflip" = "切換被阻擋：系統 hosts 包含在 hostflip 之外所做的更改";
 
 /* Workspace errors */
+"Cannot Open Workspace" = "無法開啟工作區";
 "Cannot open workspace: %@" = "無法開啟工作區：%@";
 "Cannot display /etc/hosts because it is not valid UTF-8." = "/etc/hosts 不是有效的 UTF-8，無法顯示。";
 "Cannot read /etc/hosts: %@" = "無法讀取 /etc/hosts：%@";

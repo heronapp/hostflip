@@ -138,6 +138,7 @@
 "Switch blocked: system hosts contains changes made outside hostflip" = "切り替えはブロックされました: システム hosts に hostflip の外部で行われた変更が含まれています";
 
 /* Workspace errors */
+"Cannot Open Workspace" = "ワークスペースを開けません";
 "Cannot open workspace: %@" = "ワークスペースを開けません: %@";
 "Cannot display /etc/hosts because it is not valid UTF-8." = "/etc/hosts は有効な UTF-8 ではないため表示できません。";
 "Cannot read /etc/hosts: %@" = "/etc/hosts を読み込めません: %@";
