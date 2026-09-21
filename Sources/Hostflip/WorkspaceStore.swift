@@ -1238,7 +1238,7 @@ final class WorkspaceStore {
                     )
                 case .failed(let error):
                     switchFeedback = .failed(
-                        String(localized: "Failed to update the system hosts file: \(String(describing: error))")
+                        String(localized: "Failed to update the system hosts file: \(error.userMessage)")
                     )
                 }
             } catch {
@@ -1393,7 +1393,7 @@ final class WorkspaceStore {
                     switchFeedback = .hostsDrift
                 case .failed(let error):
                     let message = String(
-                        localized: "Failed to reconcile the system hosts file: \(String(describing: error))"
+                        localized: "Failed to reconcile the system hosts file: \(error.userMessage)"
                     )
                     reconciliationError = message
                     switchFeedback = .failed(message)

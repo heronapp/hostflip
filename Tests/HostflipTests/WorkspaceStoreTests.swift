@@ -1438,6 +1438,23 @@ final class WorkspaceStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testChannelFailureFeedbackExplainsTheErrorInsteadOfNamingItsCase() async throws {
+        let stub = SwitchCoordinatingStub()
+        stub.switchOutcome = .success(.channelFailed(.unavailable, statusAfterError: .enabled))
+        let store = makeStore(coordinator: stub)
+        let profileID = try XCTUnwrap(store.createStandaloneProfile())
+
+        store.setProfileActive(profileID, true)
+        await store.switchTask?.value
+
+        guard case .failed(let message) = store.switchFeedback else {
+            return XCTFail("expected failure feedback, got: \(String(describing: store.switchFeedback))")
+        }
+        XCTAssertFalse(message.hasSuffix("unavailable"), "the bare case name leaked: \(message)")
+        XCTAssertTrue(message.contains("helper could not be reached"), message)
+    }
+
+    @MainActor
     func testChannelFailureNeedingApprovalGuidesReapproval() async throws {
         let stub = SwitchCoordinatingStub()
         stub.switchOutcome = .success(.channelFailed(.unavailable, statusAfterError: .requiresApproval))

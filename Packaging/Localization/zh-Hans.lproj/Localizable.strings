@@ -148,6 +148,14 @@
 "System hosts changed again. Review the latest diff before retrying." = "系统 hosts 再次发生更改。请查看最新差异后重试。";
 "Failed to reconcile the system hosts file: %@" = "处理系统 hosts 文件的外部更改失败：%@";
 "Hosts reconciliation failed: %@" = "处理 hosts 的外部更改失败：%@";
+"The helper could not be reached. Quit and reopen hostflip; if it keeps failing, remove the helper in Settings > Helper, then switch again." = "无法连接辅助程序。请退出并重新打开 hostflip；如果仍然失败，请在「设置 > 辅助程序」中移除辅助程序，然后再切换一次。";
+"The helper was interrupted. Try again." = "辅助程序被中断，请重试。";
+"The helper’s code signature was rejected. Reinstall hostflip." = "辅助程序的代码签名未通过验证，请重新安装 hostflip。";
+"This build of hostflip is unsigned, so it cannot connect to the helper." = "此 hostflip 构建版本未签名，无法连接辅助程序。";
+"The helper is from a different version of hostflip. Quit and reopen hostflip to finish the update." = "辅助程序与当前 hostflip 版本不一致。请退出并重新打开 hostflip 以完成更新。";
+"The helper rejected the request (%@)." = "辅助程序拒绝了请求（%@）。";
+"The helper could not write the file (%@): %@" = "辅助程序无法写入文件（%@）：%@";
+"The connection to the helper failed (%@ %lld). Try again." = "与辅助程序的连接失败（%@ %lld），请重试。";
 "Wait for the current hosts operation to finish." = "请等待当前 hosts 操作完成。";
 "No unresolved hosts drift is available to adopt." = "当前没有待处理的外部更改可供采用。";
 "Deactivate every active profile before using System Hosts as Base Hosts." = "将系统 hosts 用作基础 hosts 前，请先取消所有方案的生效。";
