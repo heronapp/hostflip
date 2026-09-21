@@ -181,7 +181,8 @@ private struct GeneralSettingsView: View {
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
-        try? process.run()
+        // Without the waiting shell, terminating would just quit the app.
+        guard (try? process.run()) != nil else { return }
         NSApp.terminate(nil)
     }
 }

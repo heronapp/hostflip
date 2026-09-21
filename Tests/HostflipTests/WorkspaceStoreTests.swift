@@ -687,6 +687,24 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertNil(store.backgroundSyncError)
     }
 
+    @MainActor
+    func testFollowUpMergeReportsALandedWriteWhenOnlyTheDNSRefreshFailed() async throws {
+        let coordinator = SwitchCoordinatingStub()
+        coordinator.authorizedMergeOutcome = .success(.channelFailed(
+            .mergeWriteFailed(HostsWriteError(stage: .flushDNS, message: "dscacheutil exited 1", writtenHash: "landed")),
+            statusAfterError: .enabled
+        ))
+        let store = makeStore(coordinator: coordinator)
+
+        _ = try XCTUnwrap(store.createStandaloneProfile())
+        await store.followUpMergeTask?.value
+
+        XCTAssertEqual(
+            store.backgroundSyncError,
+            "System hosts was updated, but DNS refresh failed: dscacheutil exited 1"
+        )
+    }
+
     // MARK: - Switching active state
 
     @MainActor
@@ -1435,6 +1453,23 @@ final class WorkspaceStoreTests: XCTestCase {
             return XCTFail("expected failure feedback, got: \(String(describing: store.switchFeedback))")
         }
         XCTAssertEqual(try reloadModel().activeProfileIDs, [])
+    }
+
+    @MainActor
+    func testChannelFailureFeedbackExplainsTheErrorInsteadOfNamingItsCase() async throws {
+        let stub = SwitchCoordinatingStub()
+        stub.switchOutcome = .success(.channelFailed(.unavailable, statusAfterError: .enabled))
+        let store = makeStore(coordinator: stub)
+        let profileID = try XCTUnwrap(store.createStandaloneProfile())
+
+        store.setProfileActive(profileID, true)
+        await store.switchTask?.value
+
+        guard case .failed(let message) = store.switchFeedback else {
+            return XCTFail("expected failure feedback, got: \(String(describing: store.switchFeedback))")
+        }
+        XCTAssertFalse(message.hasSuffix("unavailable"), "the bare case name leaked: \(message)")
+        XCTAssertTrue(message.contains("helper could not be reached"), message)
     }
 
     @MainActor

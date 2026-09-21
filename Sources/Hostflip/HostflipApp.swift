@@ -196,8 +196,16 @@ private struct MenuBarContent: View {
         }
 
         Button("Settings…") {
+            // Same treatment as the main window: follow the user to the active Space and
+            // come to front even when the cooperative activation is declined. The
+            // identifier is SwiftUI's own; if it ever changes this degrades to a no-op.
+            let settingsWindow = {
+                NSApp.windows.first { $0.identifier?.rawValue == "com_apple_SwiftUI_Settings_window" }
+            }
+            settingsWindow()?.collectionBehavior.insert(.moveToActiveSpace)
             openSettings()
             NSApp.activate()
+            settingsWindow()?.orderFrontRegardless()
         }
         .keyboardShortcut(",", modifiers: .command)
 

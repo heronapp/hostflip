@@ -80,7 +80,7 @@ struct ImportExportCommands: Commands {
         } catch {
             presentError(
                 title: String(localized: "Export Failed"),
-                message: String(localized: "Nothing was exported: \(String(describing: error))")
+                message: String(localized: "Nothing was exported: \(error.userFacingDetail)")
             )
         }
     }

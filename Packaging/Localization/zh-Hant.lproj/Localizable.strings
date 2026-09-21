@@ -138,6 +138,7 @@
 "Switch blocked: system hosts contains changes made outside hostflip" = "切換被阻擋：系統 hosts 包含在 hostflip 之外所做的更改";
 
 /* Workspace errors */
+"Cannot Open Workspace" = "無法開啟工作區";
 "Cannot open workspace: %@" = "無法開啟工作區：%@";
 "Cannot display /etc/hosts because it is not valid UTF-8." = "/etc/hosts 不是有效的 UTF-8，無法顯示。";
 "Cannot read /etc/hosts: %@" = "無法讀取 /etc/hosts：%@";
@@ -148,6 +149,15 @@
 "System hosts changed again. Review the latest diff before retrying." = "系統 hosts 再次發生更改。請檢視最新差異後重試。";
 "Failed to reconcile the system hosts file: %@" = "處理系統 hosts 檔案的外部更改失敗：%@";
 "Hosts reconciliation failed: %@" = "處理 hosts 的外部更改失敗：%@";
+"The helper could not be reached. Quit and reopen hostflip; if it keeps failing, remove the helper in Settings > Helper, then switch again." = "無法連線至輔助程式。請結束並重新開啟 hostflip；如果仍然失敗，請在「設定 > 輔助程式」中移除輔助程式，然後再切換一次。";
+"The helper was interrupted. Try again." = "輔助程式被中斷，請重試。";
+"The helper’s code signature was rejected. Reinstall hostflip." = "輔助程式的程式碼簽章未通過驗證，請重新安裝 hostflip。";
+"This build of hostflip is not properly signed, so it cannot connect to the helper." = "此 hostflip 建置版本未正確簽署，無法連線至輔助程式。";
+"The helper returned an unreadable response. Quit and reopen hostflip, then try again." = "輔助程式傳回了無法讀取的回應。請結束並重新開啟 hostflip，然後重試。";
+"The helper is from a different version of hostflip. Quit and reopen hostflip to finish the update." = "輔助程式與目前的 hostflip 版本不一致。請結束並重新開啟 hostflip 以完成更新。";
+"The helper rejected the request (%@)." = "輔助程式拒絕了要求（%@）。";
+"The helper could not write the file (%@): %@" = "輔助程式無法寫入檔案（%@）：%@";
+"The connection to the helper failed (%@ %lld). Try again." = "與輔助程式的連線失敗（%@ %lld），請重試。";
 "Wait for the current hosts operation to finish." = "請等待目前的 hosts 操作完成。";
 "No unresolved hosts drift is available to adopt." = "目前沒有待處理的外部更改可供採用。";
 "Deactivate every active profile before using System Hosts as Base Hosts." = "將系統 hosts 用作基礎 hosts 前，請先取消所有方案的生效。";

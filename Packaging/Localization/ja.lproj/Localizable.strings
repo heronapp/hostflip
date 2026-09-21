@@ -138,6 +138,7 @@
 "Switch blocked: system hosts contains changes made outside hostflip" = "切り替えはブロックされました: システム hosts に hostflip の外部で行われた変更が含まれています";
 
 /* Workspace errors */
+"Cannot Open Workspace" = "ワークスペースを開けません";
 "Cannot open workspace: %@" = "ワークスペースを開けません: %@";
 "Cannot display /etc/hosts because it is not valid UTF-8." = "/etc/hosts は有効な UTF-8 ではないため表示できません。";
 "Cannot read /etc/hosts: %@" = "/etc/hosts を読み込めません: %@";
@@ -148,6 +149,15 @@
 "System hosts changed again. Review the latest diff before retrying." = "システム hosts が再び変更されました。最新の差分を確認してから再試行してください。";
 "Failed to reconcile the system hosts file: %@" = "システム hosts ファイルの外部変更を処理できませんでした: %@";
 "Hosts reconciliation failed: %@" = "hosts の外部変更の処理に失敗しました: %@";
+"The helper could not be reached. Quit and reopen hostflip; if it keeps failing, remove the helper in Settings > Helper, then switch again." = "ヘルパーに接続できませんでした。hostflip を終了して開き直してください。それでも失敗する場合は、「設定 > ヘルパー」でヘルパーを削除してから、もう一度切り替えてください。";
+"The helper was interrupted. Try again." = "ヘルパーが中断されました。もう一度お試しください。";
+"The helper’s code signature was rejected. Reinstall hostflip." = "ヘルパーのコード署名が拒否されました。hostflip を再インストールしてください。";
+"This build of hostflip is not properly signed, so it cannot connect to the helper." = "このビルドの hostflip は正しく署名されていないため、ヘルパーに接続できません。";
+"The helper returned an unreadable response. Quit and reopen hostflip, then try again." = "ヘルパーから読み取れない応答が返されました。hostflip を終了して開き直してから、もう一度お試しください。";
+"The helper is from a different version of hostflip. Quit and reopen hostflip to finish the update." = "ヘルパーのバージョンが hostflip と一致しません。hostflip を終了して開き直し、アップデートを完了してください。";
+"The helper rejected the request (%@)." = "ヘルパーがリクエストを拒否しました（%@）。";
+"The helper could not write the file (%@): %@" = "ヘルパーはファイルに書き込めませんでした（%@）: %@";
+"The connection to the helper failed (%@ %lld). Try again." = "ヘルパーとの接続に失敗しました（%@ %lld）。もう一度お試しください。";
 "Wait for the current hosts operation to finish." = "現在の hosts 操作が完了するまでお待ちください。";
 "No unresolved hosts drift is available to adopt." = "採用できる未処理の外部変更はありません。";
 "Deactivate every active profile before using System Hosts as Base Hosts." = "システム hosts をベース hosts として使用する前に、すべてのプロファイルの適用を解除してください。";
