@@ -14,8 +14,10 @@ extension DaemonChannelError {
         case .peerRejected:
             String(localized: "The helper’s code signature was rejected. Reinstall hostflip.")
         case .selfSigningUnavailable:
-            String(localized: "This build of hostflip is unsigned, so it cannot connect to the helper.")
-        case .protocolViolation, .mergeRejected(.versionMismatch):
+            String(localized: "This build of hostflip is not properly signed, so it cannot connect to the helper.")
+        case .protocolViolation(.undecodablePayload):
+            String(localized: "The helper returned an unreadable response. Quit and reopen hostflip, then try again.")
+        case .protocolViolation(.versionMismatch), .mergeRejected(.versionMismatch):
             String(localized: "The helper is from a different version of hostflip. Quit and reopen hostflip to finish the update.")
         case .mergeRejected(let reason):
             String(localized: "The helper rejected the request (\(String(describing: reason))).")

@@ -1663,8 +1663,10 @@ final class WorkspaceStore {
         case .invalidTextEncoding:
             String(localized: "this file is not UTF-8 text")
         case nil:
-            // The surrounding sentence supplies the closing period.
-            underlyingDetail.hasSuffix(".") ? String(underlyingDetail.dropLast()) : underlyingDetail
+            // The surrounding sentence supplies the closing period; Foundation localizes
+            // its own, so the detail may end in either form.
+            underlyingDetail.hasSuffix(".") || underlyingDetail.hasSuffix("。")
+                ? String(underlyingDetail.dropLast()) : underlyingDetail
         }
         return String(localized: "Nothing was imported. \(failure.fileName): \(reason).")
     }
@@ -1804,6 +1806,11 @@ final class WorkspaceStore {
             return String(
                 localized: "Changes were saved locally, but this build is not properly signed, so the system hosts file could not be updated."
             )
+        }
+        // A written hash means the replacement landed and only the DNS refresh failed;
+        // "could not be updated" would contradict the file.
+        if case .mergeWriteFailed(let failure) = error, failure.writtenHash != nil {
+            return String(localized: "System hosts was updated, but DNS refresh failed: \(failure.message)")
         }
         return String(
             localized: "Changes were saved locally, but the system hosts file could not be updated: \(error.userMessage)"

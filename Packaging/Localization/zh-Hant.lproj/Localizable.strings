@@ -149,10 +149,11 @@
 "System hosts changed again. Review the latest diff before retrying." = "系統 hosts 再次發生更改。請檢視最新差異後重試。";
 "Failed to reconcile the system hosts file: %@" = "處理系統 hosts 檔案的外部更改失敗：%@";
 "Hosts reconciliation failed: %@" = "處理 hosts 的外部更改失敗：%@";
-"The helper could not be reached. Quit and reopen hostflip; if it keeps failing, remove the helper in Settings > Helper, then switch again." = "無法連接輔助程式。請結束並重新開啟 hostflip；如果仍然失敗，請在「設定 > 輔助程式」中移除輔助程式，然後再切換一次。";
+"The helper could not be reached. Quit and reopen hostflip; if it keeps failing, remove the helper in Settings > Helper, then switch again." = "無法連線至輔助程式。請結束並重新開啟 hostflip；如果仍然失敗，請在「設定 > 輔助程式」中移除輔助程式，然後再切換一次。";
 "The helper was interrupted. Try again." = "輔助程式被中斷，請重試。";
 "The helper’s code signature was rejected. Reinstall hostflip." = "輔助程式的程式碼簽章未通過驗證，請重新安裝 hostflip。";
-"This build of hostflip is unsigned, so it cannot connect to the helper." = "此 hostflip 建置版本未簽署，無法連接輔助程式。";
+"This build of hostflip is not properly signed, so it cannot connect to the helper." = "此 hostflip 建置版本未正確簽署，無法連線至輔助程式。";
+"The helper returned an unreadable response. Quit and reopen hostflip, then try again." = "輔助程式傳回了無法讀取的回應。請結束並重新開啟 hostflip，然後重試。";
 "The helper is from a different version of hostflip. Quit and reopen hostflip to finish the update." = "輔助程式與目前的 hostflip 版本不一致。請結束並重新開啟 hostflip 以完成更新。";
 "The helper rejected the request (%@)." = "輔助程式拒絕了要求（%@）。";
 "The helper could not write the file (%@): %@" = "輔助程式無法寫入檔案（%@）：%@";

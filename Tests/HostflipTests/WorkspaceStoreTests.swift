@@ -687,6 +687,24 @@ final class WorkspaceStoreTests: XCTestCase {
         XCTAssertNil(store.backgroundSyncError)
     }
 
+    @MainActor
+    func testFollowUpMergeReportsALandedWriteWhenOnlyTheDNSRefreshFailed() async throws {
+        let coordinator = SwitchCoordinatingStub()
+        coordinator.authorizedMergeOutcome = .success(.channelFailed(
+            .mergeWriteFailed(HostsWriteError(stage: .flushDNS, message: "dscacheutil exited 1", writtenHash: "landed")),
+            statusAfterError: .enabled
+        ))
+        let store = makeStore(coordinator: coordinator)
+
+        _ = try XCTUnwrap(store.createStandaloneProfile())
+        await store.followUpMergeTask?.value
+
+        XCTAssertEqual(
+            store.backgroundSyncError,
+            "System hosts was updated, but DNS refresh failed: dscacheutil exited 1"
+        )
+    }
+
     // MARK: - Switching active state
 
     @MainActor
