@@ -266,7 +266,7 @@ final class WorkspaceStore {
                 }
             }
         } catch {
-            loadError = String(localized: "Cannot open workspace: \(String(describing: error))")
+            loadError = String(localized: "Cannot open workspace: \(error.userFacingDetail)")
         }
     }
 
@@ -286,7 +286,7 @@ final class WorkspaceStore {
             systemHostsReadError = nil
         } catch {
             systemHostsContent = nil
-            systemHostsReadError = String(localized: "Cannot read /etc/hosts: \(String(describing: error))")
+            systemHostsReadError = String(localized: "Cannot read /etc/hosts: \(error.userFacingDetail)")
         }
     }
 
@@ -535,7 +535,7 @@ final class WorkspaceStore {
                 saveError = nil
             }
         } catch {
-            return .failed(String(localized: "Save failed: \(String(describing: error))"))
+            return .failed(String(localized: "Save failed: \(error.userFacingDetail)"))
         }
         return .created(profileID)
     }
@@ -558,7 +558,7 @@ final class WorkspaceStore {
 
     private static func remoteFetchFailureMessage(for error: any Error) -> String {
         guard let fetchError = error as? RemoteFetchError else {
-            return String(localized: "The content could not be fetched: \(String(describing: error))")
+            return String(localized: "The content could not be fetched: \(error.userFacingDetail)")
         }
         return switch fetchError {
         case .notHTTPS:
@@ -733,7 +733,7 @@ final class WorkspaceStore {
             // follow-up merge an earlier edit left pending, which would read it from the
             // in-memory model when it fires.
             followUpMergeTask?.cancel()
-            saveError = String(localized: "Save failed: \(String(describing: error))")
+            saveError = String(localized: "Save failed: \(error.userFacingDetail)")
             return
         }
         remoteRefreshErrors[profileID] = nil
@@ -778,7 +778,7 @@ final class WorkspaceStore {
         } catch {
             // The failed flag stays in memory; only the manifest write failed.
             remoteRefreshErrors[profileID] = message
-            saveError = String(localized: "Save failed: \(String(describing: error))")
+            saveError = String(localized: "Save failed: \(error.userFacingDetail)")
         }
     }
 
@@ -825,7 +825,7 @@ final class WorkspaceStore {
         } catch {
             // The success is recorded in memory; only the manifest write failed.
             remoteRefreshErrors[profileID] = nil
-            saveError = String(localized: "Save failed: \(String(describing: error))")
+            saveError = String(localized: "Save failed: \(error.userFacingDetail)")
         }
     }
 
@@ -1036,7 +1036,7 @@ final class WorkspaceStore {
         } catch is StaleRemoteDialogEdit {
             return .stale
         } catch {
-            return .failed(String(localized: "Save failed: \(String(describing: error))"))
+            return .failed(String(localized: "Save failed: \(error.userFacingDetail)"))
         }
         scheduleFollowUpMerge()
         return .saved
@@ -1242,7 +1242,7 @@ final class WorkspaceStore {
                     )
                 }
             } catch {
-                switchFeedback = .failed(String(localized: "Switch failed: \(String(describing: error))"))
+                switchFeedback = .failed(String(localized: "Switch failed: \(error.userFacingDetail)"))
             }
         }
     }
@@ -1279,7 +1279,7 @@ final class WorkspaceStore {
             backgroundSyncError = nil
         } catch {
             // The change stays committed in memory (persistByReplaying); only the disk write failed
-            saveError = String(localized: "Save failed: \(String(describing: error))")
+            saveError = String(localized: "Save failed: \(error.userFacingDetail)")
         }
         switchFeedback = .merged
     }
@@ -1400,7 +1400,7 @@ final class WorkspaceStore {
                 }
             } catch {
                 let message = String(
-                    localized: "Hosts reconciliation failed: \(String(describing: error))"
+                    localized: "Hosts reconciliation failed: \(error.userFacingDetail)"
                 )
                 reconciliationError = message
                 switchFeedback = .failed(message)
@@ -1474,7 +1474,7 @@ final class WorkspaceStore {
             backgroundSyncError = nil
             switchFeedback = .baseHostsReplaced
         } catch {
-            let message = String(localized: "Base Hosts could not be replaced: \(String(describing: error))")
+            let message = String(localized: "Base Hosts could not be replaced: \(error.userFacingDetail)")
             reconciliationError = message
             switchFeedback = .failed(message)
         }
@@ -1512,12 +1512,12 @@ final class WorkspaceStore {
             return true
         } catch {
             // The change stays committed in memory (persistByReplaying); only the disk write failed
-            saveError = String(localized: "Save failed: \(String(describing: error))")
+            saveError = String(localized: "Save failed: \(error.userFacingDetail)")
             reconciliationNeedsAttention = true
             hasHostsDrift = true
             refreshHostsDriftComparison()
             let message = String(
-                localized: "System hosts was updated, but the reconciliation could not be saved: \(String(describing: error))"
+                localized: "System hosts was updated, but the reconciliation could not be saved: \(error.userFacingDetail)"
             )
             reconciliationError = message
             switchFeedback = .failed(message)
@@ -1650,8 +1650,9 @@ final class WorkspaceStore {
             return String(localized: "Nothing was imported: the workspace is not loaded.")
         }
         guard let failure = error as? ImportFileFailure else {
-            return String(localized: "Nothing was imported: \(String(describing: error))")
+            return String(localized: "Nothing was imported: \(error.userFacingDetail)")
         }
+        let underlyingDetail = failure.underlying.userFacingDetail
         let reason = switch failure.underlying as? ImportError {
         case .unsupportedVersion(let version):
             String(localized: "this file was created by a newer version of hostflip (format version \(version))")
@@ -1662,7 +1663,8 @@ final class WorkspaceStore {
         case .invalidTextEncoding:
             String(localized: "this file is not UTF-8 text")
         case nil:
-            "\(failure.underlying)"
+            // The surrounding sentence supplies the closing period.
+            underlyingDetail.hasSuffix(".") ? String(underlyingDetail.dropLast()) : underlyingDetail
         }
         return String(localized: "Nothing was imported. \(failure.fileName): \(reason).")
     }
@@ -1676,7 +1678,7 @@ final class WorkspaceStore {
         case ImportCommitError.workspaceNotLoaded:
             String(localized: "Nothing was imported: the workspace is not loaded.")
         default:
-            String(localized: "Nothing was imported: \(String(describing: error))")
+            String(localized: "Nothing was imported: \(error.userFacingDetail)")
         }
     }
 
@@ -1704,7 +1706,7 @@ final class WorkspaceStore {
                 return
             }
         } catch {
-            saveError = String(localized: "Save failed: \(String(describing: error))")
+            saveError = String(localized: "Save failed: \(error.userFacingDetail)")
             return
         }
         scheduleFollowUpMerge()
@@ -1793,7 +1795,7 @@ final class WorkspaceStore {
             return backgroundSyncFailureMessage(for: channelError)
         }
         return String(
-            localized: "Changes were saved locally, but the system hosts file could not be updated: \(String(describing: error))"
+            localized: "Changes were saved locally, but the system hosts file could not be updated: \(error.userFacingDetail)"
         )
     }
 
@@ -1804,7 +1806,7 @@ final class WorkspaceStore {
             )
         }
         return String(
-            localized: "Changes were saved locally, but the system hosts file could not be updated: \(String(describing: error))"
+            localized: "Changes were saved locally, but the system hosts file could not be updated: \(error.userMessage)"
         )
     }
 }
