@@ -1,0 +1,27 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    # macOS minutes are free on the public repository only; the private mirror skips this job.
+    if: github.repository == 'heronapp/hostflip'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select the newest Xcode
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_[0-9]*.app | sort -V | tail -1)"
+          swift --version
+      - name: Run the test suite
+        run: swift test
