@@ -12,11 +12,8 @@ jobs:
   test:
     # macOS minutes are free on the public repository only; the private mirror skips this job.
     if: github.repository == 'heronapp/hostflip'
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-15, macos-26]
-    runs-on: ${{ matrix.os }}
+    # macos-15 tops out at Xcode 26.3 (Swift 6.2), older than the toolchain releases are built with.
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - name: Select the newest Xcode
