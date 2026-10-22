@@ -14,7 +14,9 @@ Most hosts managers treat `/etc/hosts` as their own: every save rewrites the who
 - **Your baseline is protected.** On first run, your current `/etc/hosts` is imported as the read-only *Base Hosts* — always applied first, never lost, and the original file is kept as a permanent backup.
 - **A real activation model.** Profiles live in groups: at most one profile per group is active (mutually exclusive), while active profiles across groups and standalone profiles stack together into the final hosts file.
 - **Zero-interruption switching.** A one-time approval of an embedded `SMAppService` daemon replaces per-switch password prompts.
-- **Native and lightweight.** Swift + SwiftUI menu bar app. No web runtime, no background bloat.
+- **Remote Profiles.** Point a profile at an HTTPS URL and hostflip keeps it current — every hour, every 6 or 24 hours, or on demand. A failed refresh keeps the last good content, and the editor always shows when it last succeeded.
+- **An editor made for hosts files.** Syntax highlighting, ⌘/ to comment a mapping on or off, a gutter warning for lines that won't take effect, and ⌘⇧F to find a hostname across every profile.
+- **Native and lightweight.** Swift + SwiftUI menu bar app. No web runtime, no background bloat. Available in English, Simplified Chinese, Traditional Chinese, and Japanese.
 - **Pause everything.** One master switch restores your baseline hosts while remembering every profile's state.
 - **Switching from SwitchHosts? One click.** hostflip detects SwitchHosts data in any of its three generations (v3/v4/v5) and imports the lot: folders become groups, remote rules become Remote Profiles that keep refreshing on their own, and everything arrives inactive with a full summary of what came in, what was skipped, and what was adjusted. The [migration guide](docs/migrating-from-switchhosts.md) covers what carries over, what works differently, and the order of operations.
 
@@ -45,7 +47,7 @@ Grab the notarized DMG from [Releases](https://github.com/heronapp/hostflip/rele
 
 ## How it works
 
-hostflip owns the whole `/etc/hosts` file and rewrites it atomically: Base Hosts first, then every active profile, each section clearly labeled. Writes go through a minimal root daemon whose XPC interface accepts exactly one operation — replace the hosts file with merged content — with code-signing verification on both sides of the connection. The daemon flushes the DNS cache after every write.
+hostflip rewrites `/etc/hosts` atomically: Base Hosts first, verbatim, then every active profile inside a fenced block, each section clearly labeled. Writes go through a minimal root daemon whose XPC interface accepts exactly one operation — replace the hosts file with merged content — with code-signing verification on both sides of the connection. The daemon flushes the DNS cache after every write.
 
 The first time you actually switch something, macOS asks you to approve the helper in System Settings. That's the only prompt you will ever see.
 
@@ -97,7 +99,7 @@ There is no supported command to remove a single app's row. The only lever macOS
 ## Updating
 
 - Homebrew: `brew upgrade --cask hostflip`
-- In-app: “Check for Updates” compares your version against the latest GitHub Release.
+- In-app: with automatic checks on (Settings › Updates), hostflip offers each new version and installs it in place; “Check for Updates” in the same pane checks right away.
 
 ## Build from source
 
@@ -112,10 +114,6 @@ An ad-hoc build verifies the packaging structure, but the XPC channel intentiona
 Use “Deactivate and Remove Helper…” in the app first (unregisters the daemon), then delete `Hostflip.app`. `brew uninstall --zap --cask hostflip` also clears application data. The Hostflip row under App Background Activity in System Settings clears once the app is deleted — see the FAQ if it seems to linger.
 
 Note that `/etc/hosts` keeps whatever hostflip last wrote — uninstalling does not rewrite it. Everything hostflip added sits in a clearly fenced block at the bottom of the file (`# ══ hostflip:begin … ══` through `# ══ hostflip:end ══`), so leftover entries are easy to spot and delete by hand. Better still, turn off the master switch **before** removing the helper: that restores the file to exactly your baseline hosts, with no hostflip traces at all — once the helper is gone, hostflip can no longer write the file. Your pre-hostflip hosts file is also preserved as `hosts.orig` in `~/Library/Application Support/hostflip` until that folder is zapped.
-
-## About
-
-hostflip is made by the developer of [Heron](https://getheron.app/), a paid macOS app for debugging iPhone web traffic. hostflip is MIT-licensed and standalone — it has no dependency on Heron.
 
 ## License
 
