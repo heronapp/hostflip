@@ -135,7 +135,13 @@ final class WorkspaceStore {
     /// The in-flight switch task; tests await its completion before asserting the result.
     private(set) var switchTask: Task<Void, Never>?
     /// The system hosts differs from the last confirmed baseline; watching is unaffected by the paused state.
-    private(set) var hasHostsDrift = false
+    /// Clearing it drops a pending review request, which must not pop up on a later drift.
+    private(set) var hasHostsDrift = false {
+        didSet { if !hasHostsDrift { isDriftReviewRequested = false } }
+    }
+    /// The menu bar asked for the drift review (#95); the main window's banner presents it and
+    /// consumes the request, so a request made before the window exists waits for it.
+    private(set) var isDriftReviewRequested = false
     /// The single snapshot of the observed state used for both user review and safe reconciliation.
     private(set) var hostsDriftComparison: HostsDriftComparison?
     /// Read-only UTF-8 snapshot of the current system hosts; independent of the workspace model.
@@ -1314,6 +1320,18 @@ final class WorkspaceStore {
 
     func clearBackgroundSyncError() {
         backgroundSyncError = nil
+    }
+
+    func requestDriftReview() {
+        guard hasHostsDrift else { return }
+        isDriftReviewRequested = true
+    }
+
+    /// Clears a pending review request; true when there was one.
+    func consumeDriftReviewRequest() -> Bool {
+        guard isDriftReviewRequested else { return false }
+        isDriftReviewRequested = false
+        return true
     }
 
     /// Opens the Login Items pane in System Settings, used by the guidance button of the "approval required" feedback.
