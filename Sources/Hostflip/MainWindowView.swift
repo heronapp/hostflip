@@ -1305,6 +1305,12 @@ private struct MainWindowStateBanner: View {
             .sheet(isPresented: $isReviewing) {
                 HostsDriftReviewSheet(store: store)
             }
+            // `initial` picks up a request made before this window existed.
+            .onChange(of: store.isDriftReviewRequested, initial: true) {
+                if store.consumeDriftReviewRequest() {
+                    isReviewing = true
+                }
+            }
         }
     }
 
@@ -1505,7 +1511,8 @@ private struct HostsDriftReviewSheet: View {
         } message: {
             Text("This replaces the current Base Hosts without creating an undo copy. The original hosts.orig backup and /etc/hosts will not be changed.")
         }
-        .onChange(of: store.hasHostsDrift) {
+        // `initial` covers a presentation that waited behind another sheet while the drift resolved.
+        .onChange(of: store.hasHostsDrift, initial: true) {
             if !store.hasHostsDrift {
                 dismiss()
             }

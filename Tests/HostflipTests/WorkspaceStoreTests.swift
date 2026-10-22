@@ -1397,6 +1397,42 @@ final class WorkspaceStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testDriftReviewRequestIsConsumedOnce() {
+        let monitor = HostsDriftMonitoringStub()
+        let store = makeStore(coordinator: SwitchCoordinatingStub(), driftMonitor: monitor)
+        monitor.report(true)
+
+        store.requestDriftReview()
+
+        XCTAssertTrue(store.isDriftReviewRequested)
+        XCTAssertTrue(store.consumeDriftReviewRequest())
+        XCTAssertFalse(store.isDriftReviewRequested)
+        XCTAssertFalse(store.consumeDriftReviewRequest())
+    }
+
+    @MainActor
+    func testDriftReviewRequestWithoutDriftIsIgnored() {
+        let store = makeStore(coordinator: SwitchCoordinatingStub(), driftMonitor: HostsDriftMonitoringStub())
+
+        store.requestDriftReview()
+
+        XCTAssertFalse(store.isDriftReviewRequested)
+        XCTAssertFalse(store.consumeDriftReviewRequest())
+    }
+
+    @MainActor
+    func testResolvedDriftDropsAPendingReviewRequest() {
+        let monitor = HostsDriftMonitoringStub()
+        let store = makeStore(coordinator: SwitchCoordinatingStub(), driftMonitor: monitor)
+        monitor.report(true)
+        store.requestDriftReview()
+
+        monitor.report(false)
+
+        XCTAssertFalse(store.isDriftReviewRequested)
+    }
+
+    @MainActor
     func testDriftDetectionContinuesWhilePaused() async {
         let monitor = HostsDriftMonitoringStub()
         let store = makeStore(coordinator: SwitchCoordinatingStub(), driftMonitor: monitor)

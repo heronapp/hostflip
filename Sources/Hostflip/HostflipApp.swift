@@ -156,6 +156,7 @@ private struct MenuBarContent: View {
 
         if store.hasHostsDrift {
             Button("Hosts file changed externally — Review…") {
+                store.requestDriftReview()
                 applicationDelegate.requestMainWindow()
             }
         }
